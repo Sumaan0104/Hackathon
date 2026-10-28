@@ -17,7 +17,8 @@ import {
   RotateCcw,
   LogIn,
   ShieldAlert,
-  User
+  User,
+  Database
 } from 'lucide-react';
 import { Profile, UserRole } from '@/lib/types';
 
@@ -25,6 +26,7 @@ interface NavbarProps {
   currentProfile: Profile;
   profiles: Profile[];
   weeklyHours: number;
+  isDatabaseConnected?: boolean;
   onSwitchProfile: (profileId: string) => void;
   onOpenCreateResource?: () => void;
   onOpenArchitecture?: () => void;
@@ -35,6 +37,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   currentProfile,
   profiles,
   weeklyHours,
+  isDatabaseConnected = false,
   onSwitchProfile,
   onOpenCreateResource,
   onOpenArchitecture,
@@ -117,6 +120,26 @@ export const Navbar: React.FC<NavbarProps> = ({
           {/* User Status, Role Switcher & Action */}
           <div className="hidden lg:flex items-center gap-2.5">
             
+            {/* Database Engine Indicator */}
+            {onOpenArchitecture && (
+              <button
+                onClick={onOpenArchitecture}
+                title={
+                  isDatabaseConnected
+                    ? 'Connected to live Supabase PostgreSQL (Shared in real-time across all devices).'
+                    : 'Currently on local server fallback. Run SUPABASE_SETUP.sql in Supabase to connect shared Postgres.'
+                }
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold border transition-colors cursor-pointer ${
+                  isDatabaseConnected
+                    ? 'border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300'
+                    : 'border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-950/70 dark:text-amber-300'
+                }`}
+              >
+                <span className={`h-2 w-2 rounded-full ${isDatabaseConnected ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
+                <span>{isDatabaseConnected ? 'Supabase Postgres' : 'Local Store'}</span>
+              </button>
+            )}
+
             {/* Architecture Specs Button */}
             {onOpenArchitecture && (
               <button

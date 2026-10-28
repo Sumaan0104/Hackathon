@@ -44,6 +44,7 @@ interface CampusShareContextType {
   auditLogs: AuditLogEntry[];
   weeklyHours: number;
   loading: boolean;
+  isDatabaseConnected: boolean;
   switchProfile: (profileIdOrEmail: string) => Promise<void>;
   openBookingModal: (resource: Resource) => void;
   openDecisionModal: (booking: Booking) => void;
@@ -82,6 +83,7 @@ export const CampusShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
   const [incidents, setIncidents] = useState<IncidentReport[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([]);
   const [weeklyHours, setWeeklyHours] = useState<number>(0);
+  const [isDatabaseConnected, setIsDatabaseConnected] = useState<boolean>(false);
   const [loading, setLoading] = useState(true);
 
   // Modals state
@@ -117,6 +119,7 @@ export const CampusShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
       setIncidents(data.incidents);
       setAuditLogs(data.auditLogs);
       setWeeklyHours(data.weeklyHours);
+      setIsDatabaseConnected(Boolean(data.isDatabaseConnected));
     } catch (e: any) {
       console.error('Error fetching data:', e);
     } finally {
@@ -294,6 +297,7 @@ export const CampusShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
         auditLogs,
         weeklyHours,
         loading,
+        isDatabaseConnected,
         switchProfile,
         openBookingModal,
         openDecisionModal,
@@ -311,6 +315,7 @@ export const CampusShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
           currentProfile={currentProfile}
           profiles={profiles}
           weeklyHours={weeklyHours}
+          isDatabaseConnected={isDatabaseConnected}
           onSwitchProfile={switchProfile}
           onOpenCreateResource={openCreateResourceModal}
           onOpenArchitecture={openArchitectureModal}

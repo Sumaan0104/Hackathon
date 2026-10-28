@@ -114,6 +114,17 @@ export const ArchitectureModal: React.FC<ArchitectureModalProps> = ({ isOpen, on
             </p>
           </div>
 
+          {/* Shared Database Engine */}
+          <div className="rounded-xl border border-indigo-200 dark:border-indigo-900/60 bg-indigo-50/70 dark:bg-indigo-950/30 p-3.5 space-y-1.5">
+            <div className="flex items-center gap-2 font-bold text-indigo-900 dark:text-indigo-200">
+              <Database className="h-4 w-4 text-indigo-600" />
+              <span>5. Cross-Device Shared Database (Supabase PostgreSQL)</span>
+            </div>
+            <p className="text-indigo-800 dark:text-indigo-300 leading-relaxed text-[11px]">
+              To ensure multiple judges testing on different phones and laptops see the exact same live bookings and written decisions simultaneously, the system is designed to synchronize directly with Supabase PostgreSQL (<code className="font-mono text-indigo-700 dark:text-indigo-300">SUPABASE_SETUP.sql</code>). If tables are not yet created, the system gracefully falls back to persistent server JSON.
+            </p>
+          </div>
+
         </div>
 
         {/* Footer */}
