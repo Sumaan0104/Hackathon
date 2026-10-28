@@ -70,8 +70,11 @@ CREATE TABLE bookings (
     checkin_checklist JSONB DEFAULT '{"physicalChecked": true, "cleanlinessVerified": true, "safetySecured": true, "accessoriesPresent": true}'::jsonb,
     checked_in_at TIMESTAMPTZ,
     return_condition_notes TEXT,
+    return_condition_rating TEXT CHECK (return_condition_rating IN ('good', 'minor wear', 'damaged') OR return_condition_rating IS NULL),
     return_checklist JSONB DEFAULT '{"physicalChecked": true, "cleanlinessVerified": true, "safetySecured": true, "accessoriesPresent": true}'::jsonb,
     returned_at TIMESTAMPTZ,
+    is_late BOOLEAN DEFAULT FALSE,
+    late_minutes INTEGER DEFAULT 0,
     clash_detected BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -86,10 +89,14 @@ CREATE TABLE incidents (
     reported_by TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
     reporter_name TEXT NOT NULL,
     reporter_role TEXT NOT NULL DEFAULT 'user',
-    type TEXT NOT NULL CHECK (type IN ('delay', 'damage', 'incident')),
+    type TEXT NOT NULL CHECK (type IN ('delay', 'damage', 'safety', 'conflict', 'incident')),
     severity TEXT NOT NULL DEFAULT 'low' CHECK (severity IN ('low', 'medium', 'high')),
     status TEXT NOT NULL DEFAULT 'acknowledged',
     description TEXT NOT NULL,
+    resolution_notes TEXT,
+    resolved_at TIMESTAMPTZ,
+    resolved_by TEXT,
+    resolved_by_name TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -178,3 +185,13 @@ VALUES
 ('aud-102', 'owner-1', 'Prof. Elena Vance', 'owner', 'BOOKING_APPROVED', 'booking', 'bk-101', '{"written_reason": "All gear safety prerequisites verified and shoot schedule is well within depot operational hours."}'::jsonb),
 ('aud-103', 'user-1', 'Alex Rivera (Certified)', 'user', 'BOOKING_REQUESTED', 'booking', 'bk-102', '{"resource_name": "Makerspace Rapid Prototyping & PCB Milling Station", "duration_hours": 2.0}'::jsonb)
 ON CONFLICT (id) DO NOTHING;
+
+-- 8. Idempotent Schema Upgrades (Ensures existing Supabase instances have latest columns)
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS return_condition_rating TEXT;
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS is_late BOOLEAN DEFAULT FALSE;
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS late_minutes INTEGER DEFAULT 0;
+
+ALTER TABLE incidents ADD COLUMN IF NOT EXISTS resolution_notes TEXT;
+ALTER TABLE incidents ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMPTZ;
+ALTER TABLE incidents ADD COLUMN IF NOT EXISTS resolved_by TEXT;
+ALTER TABLE incidents ADD COLUMN IF NOT EXISTS resolved_by_name TEXT;

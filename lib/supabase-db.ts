@@ -121,6 +121,14 @@ export async function insertSupabaseBooking(booking: Booking): Promise<boolean> 
     const { resource, ...dbRow } = booking;
     const { error } = await supabaseDb.from('bookings').upsert(dbRow);
     if (error) {
+      if (error.code === 'PGRST204' || error.message?.includes('column')) {
+        const fallbackRow = { ...dbRow };
+        delete (fallbackRow as any).return_condition_rating;
+        delete (fallbackRow as any).is_late;
+        delete (fallbackRow as any).late_minutes;
+        const retry = await supabaseDb.from('bookings').upsert(fallbackRow);
+        if (!retry.error) return true;
+      }
       console.warn('Failed to upsert booking to Supabase:', error);
       return false;
     }
@@ -139,6 +147,14 @@ export async function updateSupabaseBooking(bookingId: string, updates: Partial<
       .update(dbRow)
       .eq('id', bookingId);
     if (error) {
+      if (error.code === 'PGRST204' || error.message?.includes('column')) {
+        const fallbackRow = { ...dbRow };
+        delete (fallbackRow as any).return_condition_rating;
+        delete (fallbackRow as any).is_late;
+        delete (fallbackRow as any).late_minutes;
+        const retry = await supabaseDb.from('bookings').update(fallbackRow).eq('id', bookingId);
+        if (!retry.error) return true;
+      }
       console.warn('Failed to update booking in Supabase:', error);
       return false;
     }
@@ -167,6 +183,15 @@ export async function insertSupabaseIncident(incident: IncidentReport): Promise<
   try {
     const { error } = await supabaseDb.from('incidents').insert(incident);
     if (error) {
+      if (error.code === 'PGRST204' || error.message?.includes('column')) {
+        const fallbackRow = { ...incident };
+        delete (fallbackRow as any).resolution_notes;
+        delete (fallbackRow as any).resolved_at;
+        delete (fallbackRow as any).resolved_by;
+        delete (fallbackRow as any).resolved_by_name;
+        const retry = await supabaseDb.from('incidents').insert(fallbackRow);
+        if (!retry.error) return true;
+      }
       console.warn('Failed to insert incident to Supabase:', error);
       return false;
     }

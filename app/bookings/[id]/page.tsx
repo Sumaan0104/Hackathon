@@ -33,11 +33,12 @@ import {
 } from 'lucide-react';
 
 interface BookingDetailPageProps {
-  params: Promise<{ id: string }>;
+  params: Promise<{ id: string }> | { id: string };
 }
 
 export default function BookingDetailPage({ params }: BookingDetailPageProps) {
-  const { id: bookingId } = use(params);
+  const unwrappedParams = typeof (params as any)?.then === 'function' ? use(params as Promise<{ id: string }>) : (params as { id: string });
+  const bookingId = unwrappedParams.id;
   const { 
     currentProfile, 
     switchProfile, 

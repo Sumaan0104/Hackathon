@@ -44,13 +44,25 @@ export default function AuditLogPage() {
     if (action.includes('WAITLISTED')) {
       return 'bg-purple-100 text-purple-800 border-purple-300 dark:bg-purple-950/60 dark:text-purple-300';
     }
+    if (action.includes('CHECKED_IN')) {
+      return 'bg-teal-100 text-teal-800 border-teal-300 dark:bg-teal-950/60 dark:text-teal-300';
+    }
+    if (action.includes('LATE_RETURN')) {
+      return 'bg-orange-100 text-orange-800 border-orange-300 dark:bg-orange-950/60 dark:text-orange-300';
+    }
+    if (action.includes('RETURNED')) {
+      return 'bg-blue-100 text-blue-800 border-blue-300 dark:bg-blue-950/60 dark:text-blue-300';
+    }
     if (action.includes('REQUESTED')) {
-      return 'bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-950/60 dark:text-amber-300';
+      return 'bg-sky-100 text-sky-800 border-sky-300 dark:bg-sky-950/60 dark:text-sky-300';
+    }
+    if (action.includes('RESOLVED')) {
+      return 'bg-emerald-100 text-emerald-800 border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-300';
     }
     if (action.includes('INCIDENT')) {
       return 'bg-rose-100 text-rose-800 border-rose-300 dark:bg-rose-950/60 dark:text-rose-300';
     }
-    return 'bg-blue-100 text-blue-800 border-blue-300 dark:bg-blue-950/60 dark:text-blue-300';
+    return 'bg-zinc-100 text-zinc-800 border-zinc-300 dark:bg-zinc-800 dark:text-zinc-300';
   };
 
   const handleCopy = (id: string, text: string) => {
