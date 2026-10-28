@@ -155,15 +155,17 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
 
     try {
       setSubmitting(true);
+      const isoStart = `${startDate}T${startTime}:00Z`;
+      const isoEnd = `${startDate}T${endTime}:00Z`;
       const res = await onSubmit(
         resource.id,
-        new Date(startIso).toISOString(),
-        new Date(endIso).toISOString(),
+        isoStart,
+        isoEnd,
         purpose.trim()
       );
 
       if (res && res.clash) {
-        setServerClash(res.conflictingSlot || { start: startIso, end: endIso, userName: 'Approved Session' });
+        setServerClash(res.conflictingSlot || { start: isoStart, end: isoEnd, userName: 'Approved Session' });
         setErrorMsg('Conflict: The requested time slot is already booked. You can join the fair-access waitlist below.');
       } else {
         onClose();
@@ -179,10 +181,12 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
     setErrorMsg(null);
     try {
       setWaitlistSubmitting(true);
+      const isoStart = `${startDate}T${startTime}:00Z`;
+      const isoEnd = `${startDate}T${endTime}:00Z`;
       await onJoinWaitlist(
         resource.id,
-        new Date(startIso).toISOString(),
-        new Date(endIso).toISOString(),
+        isoStart,
+        isoEnd,
         purpose.trim() || 'Waitlist request due to time slot clash.'
       );
       onClose();
@@ -409,7 +413,7 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 rounded-xl font-medium text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+              className="px-4 py-2 rounded-xl font-medium text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-white transition-colors cursor-pointer"
             >
               Cancel
             </button>

@@ -57,7 +57,7 @@ export const IncidentReportModal: React.FC<IncidentReportModalProps> = ({
               {booking.resource?.name}
             </h2>
           </div>
-          <button onClick={onClose} className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-700">
+          <button onClick={onClose} className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer">
             <X className="h-5 w-5" />
           </button>
         </div>
@@ -101,7 +101,7 @@ export const IncidentReportModal: React.FC<IncidentReportModalProps> = ({
                     className={`p-2.5 rounded-xl border text-xs font-semibold flex flex-col items-center gap-1 transition-all cursor-pointer ${
                       type === cat.id
                         ? 'border-rose-500 bg-rose-50 text-rose-800 dark:bg-rose-950/60 dark:text-rose-200 ring-2 ring-rose-500/20'
-                        : 'border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50'
+                        : 'border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-white'
                     }`}
                   >
                     <Icon className="h-4 w-4" />
@@ -130,7 +130,7 @@ export const IncidentReportModal: React.FC<IncidentReportModalProps> = ({
                   className={`p-2 rounded-lg border text-[11px] font-semibold transition-all cursor-pointer ${
                     severity === s.id
                       ? 'border-indigo-600 bg-indigo-50 text-indigo-900 dark:bg-indigo-950 dark:text-indigo-200'
-                      : 'border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400'
+                      : 'border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-white'
                   }`}
                 >
                   {s.label}
@@ -158,7 +158,7 @@ export const IncidentReportModal: React.FC<IncidentReportModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 rounded-xl text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300"
+              className="px-4 py-2 rounded-xl text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-white transition-colors cursor-pointer"
             >
               Cancel
             </button>

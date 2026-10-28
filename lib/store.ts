@@ -297,17 +297,16 @@ class CampusShareStore {
     }
 
     // 1. Operating Hours Validation
-    // Extract local HH:mm from start and end
-    const startHourMin = `${String(start.getUTCHours()).padStart(2, '0')}:${String(start.getUTCMinutes()).padStart(2, '0')}`;
-    const endHourMin = `${String(end.getUTCHours()).padStart(2, '0')}:${String(end.getUTCMinutes()).padStart(2, '0')}`;
-    
-    // Compare against resource.open_time and resource.close_time
     const openTime = resource.open_time || '08:00';
     const closeTime = resource.close_time || '20:00';
     
-    // Extract time of day from ISO strings or local representation
-    const startTimePart = startTime.includes('T') ? startTime.split('T')[1].substring(0, 5) : startHourMin;
-    const endTimePart = endTime.includes('T') ? endTime.split('T')[1].substring(0, 5) : endHourMin;
+    // Extract HH:mm part from string directly (wall-clock time intended by the user)
+    const startTimePart = startTime.includes('T') 
+      ? startTime.split('T')[1].substring(0, 5) 
+      : `${String(start.getUTCHours()).padStart(2, '0')}:${String(start.getUTCMinutes()).padStart(2, '0')}`;
+    const endTimePart = endTime.includes('T') 
+      ? endTime.split('T')[1].substring(0, 5) 
+      : `${String(end.getUTCHours()).padStart(2, '0')}:${String(end.getUTCMinutes()).padStart(2, '0')}`;
 
     if (startTimePart < openTime || endTimePart > closeTime) {
       const err = `Operating Hours Violation: Booking must fall within facility operating hours (${openTime} to ${closeTime}). Requested: ${startTimePart} to ${endTimePart}.`;

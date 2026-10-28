@@ -281,7 +281,7 @@ export default function BookingsPage() {
             className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
               activeTab === 'my-bookings'
                 ? 'bg-white text-zinc-900 dark:bg-zinc-900 dark:text-white shadow-xs'
-                : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900'
+                : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-200/50 dark:hover:bg-zinc-700/50'
             }`}
           >
             My Bookings ({myBookings.length})
@@ -292,7 +292,7 @@ export default function BookingsPage() {
             className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
               activeTab === 'owner'
                 ? 'bg-white text-zinc-900 dark:bg-zinc-900 dark:text-white shadow-xs'
-                : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900'
+                : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-200/50 dark:hover:bg-zinc-700/50'
             }`}
           >
             Owner Review Portal ({ownerBookings.length})
@@ -303,7 +303,7 @@ export default function BookingsPage() {
             className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
               activeTab === 'history'
                 ? 'bg-white text-zinc-900 dark:bg-zinc-900 dark:text-white shadow-xs'
-                : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900'
+                : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-200/50 dark:hover:bg-zinc-700/50'
             }`}
           >
             All Bookings ({bookings.length})

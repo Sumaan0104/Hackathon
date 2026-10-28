@@ -159,7 +159,7 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
         <button
           onClick={() => onViewWaitlist(resource)}
           title="View Fair-Access Waitlist Queue (Ordered by least recent use)"
-          className="flex items-center justify-center gap-1 px-3 py-2 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:text-zinc-300 text-xs font-medium rounded-xl transition-colors cursor-pointer"
+          className="flex items-center justify-center gap-1 px-3 py-2 bg-zinc-100 hover:bg-zinc-200 hover:text-zinc-900 text-zinc-700 dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:text-zinc-300 dark:hover:text-white text-xs font-medium rounded-xl transition-colors cursor-pointer"
         >
           <ListOrdered className="h-4 w-4" />
           <span className="hidden sm:inline">Waitlist</span>

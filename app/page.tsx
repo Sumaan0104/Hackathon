@@ -217,7 +217,7 @@ export default function HomePage() {
                   className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer whitespace-nowrap ${
                     isSelected
                       ? 'bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 shadow-xs'
-                      : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700'
+                      : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200 hover:text-zinc-900 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700 dark:hover:text-white'
                   }`}
                 >
                   <Icon className="h-3.5 w-3.5" />
@@ -251,7 +251,7 @@ export default function HomePage() {
                 className={`px-2.5 py-0.5 rounded-md text-[11px] font-medium transition-colors cursor-pointer capitalize ${
                   selectedDepartment === dept
                     ? 'bg-indigo-100 text-indigo-900 font-semibold dark:bg-indigo-950 dark:text-indigo-200'
-                    : 'hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400'
+                    : 'hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'
                 }`}
               >
                 {dept === 'all' ? 'All Departments' : dept}

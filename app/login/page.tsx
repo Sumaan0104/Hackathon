@@ -160,11 +160,11 @@ export default function LoginPage() {
             <button
               type="button"
               onClick={() => quickLoginAs('user2@demo.com')}
-              className="w-full text-left p-3 rounded-2xl border-2 border-amber-300 dark:border-amber-800 bg-amber-50/70 dark:bg-amber-950/40 hover:bg-amber-100/70 transition-all flex items-center justify-between cursor-pointer group"
+              className="w-full text-left p-3 rounded-2xl border-2 border-amber-300 dark:border-amber-800 bg-amber-50/70 dark:bg-amber-950/40 hover:bg-amber-100/70 dark:hover:bg-amber-900/40 transition-all flex items-center justify-between cursor-pointer group"
             >
               <div>
                 <div className="flex items-center gap-2">
-                  <span className="font-bold text-xs text-amber-950 dark:text-amber-100">
+                  <span className="font-bold text-xs text-amber-950 dark:text-amber-100 group-hover:text-amber-700 dark:group-hover:text-amber-300 transition-colors">
                     user2@demo.com
                   </span>
                   <span className="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300 border border-red-300 dark:border-red-800">
@@ -188,7 +188,7 @@ export default function LoginPage() {
             >
               <div>
                 <div className="flex items-center gap-2">
-                  <span className="font-bold text-xs text-zinc-900 dark:text-white">
+                  <span className="font-bold text-xs text-zinc-900 dark:text-white group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
                     user1@demo.com
                   </span>
                   <span className="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
@@ -212,7 +212,7 @@ export default function LoginPage() {
             >
               <div>
                 <div className="flex items-center gap-2">
-                  <span className="font-bold text-xs text-zinc-900 dark:text-white">
+                  <span className="font-bold text-xs text-zinc-900 dark:text-white group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
                     owner@demo.com
                   </span>
                   <span className="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border border-amber-300 dark:border-amber-800">
@@ -236,7 +236,7 @@ export default function LoginPage() {
             >
               <div>
                 <div className="flex items-center gap-2">
-                  <span className="font-bold text-xs text-zinc-900 dark:text-white">
+                  <span className="font-bold text-xs text-zinc-900 dark:text-white group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
                     admin@demo.com
                   </span>
                   <span className="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300 border border-purple-300 dark:border-purple-800">
