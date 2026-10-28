@@ -9,9 +9,11 @@ import {
   AlertTriangle, 
   CheckCircle2, 
   ShieldCheck, 
+  ShieldAlert,
   Send,
   AlertCircle,
-  HelpCircle
+  HelpCircle,
+  Lock
 } from 'lucide-react';
 
 interface BookingRequestModalProps {
@@ -47,10 +49,17 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
       tomorrow.setDate(tomorrow.getDate() + 1);
       setStartDate(tomorrow.toISOString().split('T')[0]);
       setErrorMsg(null);
+      setEligibilityConfirmed(false);
     }
   }, [isOpen]);
 
   if (!isOpen || !resource) return null;
+
+  // Eligibility checking: Compare resource.required_certifications with currentProfile.certifications
+  const userCerts = currentProfile.certifications || [];
+  const requiredCerts = resource.required_certifications || [];
+  const missingCerts = requiredCerts.filter((c) => !userCerts.includes(c));
+  const isEligibilityBlocked = missingCerts.length > 0;
 
   // Compute requested duration
   const startIso = startDate ? `${startDate}T${startTime}:00` : '';
@@ -65,7 +74,7 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
   const projectedWeeklyHours = weeklyHours + durationHours;
   const isCapExceeded = projectedWeeklyHours > userCap;
 
-  // Real-time clash detection with approved sessions for this resource on this day
+  // Real-time clash detection with approved sessions for this resource
   const relevantBookings = existingBookings.filter(
     (b) => b.resource_id === resource.id && ['approved', 'checked_in'].includes(b.status)
   );
@@ -82,6 +91,14 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
+
+    // Strict front-end gate
+    if (isEligibilityBlocked) {
+      setErrorMsg(
+        `Eligibility Blocked: You do not possess the required certification(s): "${missingCerts.join(', ')}". Booking cannot proceed.`
+      );
+      return;
+    }
 
     if (!eligibilityConfirmed) {
       setErrorMsg('Mandatory Verification: You must certify you meet the eligibility criteria.');
@@ -150,34 +167,61 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
 
         {/* Content */}
         <form onSubmit={handleSubmit} className="p-5 space-y-4 overflow-y-auto flex-1 text-xs">
+          
+          {/* CRITICAL ELIGIBILITY BLOCKING BANNER */}
+          {isEligibilityBlocked ? (
+            <div className="rounded-2xl border-2 border-red-500 bg-red-50/90 dark:bg-red-950/60 p-4 space-y-2.5 text-xs text-red-900 dark:text-red-200 shadow-md">
+              <div className="flex items-center gap-2 text-sm font-extrabold text-red-700 dark:text-red-300">
+                <ShieldAlert className="h-5 w-5 text-red-600 shrink-0" />
+                <span>Eligibility Blocked: Mandatory Certifications Missing</span>
+              </div>
+              <p className="leading-relaxed">
+                You cannot reserve <strong>{resource.name}</strong> because your student profile lacks required prerequisite safety clearances:
+              </p>
+              <div className="p-2.5 rounded-xl bg-red-100 dark:bg-red-900/40 border border-red-300 dark:border-red-800 font-mono text-xs font-bold text-red-900 dark:text-red-100">
+                Missing Required: {missingCerts.join(', ')}
+              </div>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between text-[11px] text-zinc-600 dark:text-zinc-400 gap-1 pt-1 border-t border-red-200 dark:border-red-900/60">
+                <span>
+                  Logged in as: <strong>{currentProfile.email}</strong> ({currentProfile.full_name})
+                </span>
+                <span>
+                  Certifications on file: <strong className="text-red-600 dark:text-red-400">{userCerts.length > 0 ? userCerts.join(', ') : 'None (0 on file)'}</strong>
+                </span>
+              </div>
+              <p className="text-[11px] text-red-800 dark:text-red-300 italic">
+                Notice: To unlock this facility, enroll in and pass the {missingCerts[0]} via the campus EHS safety portal.
+              </p>
+            </div>
+          ) : (
+            <div className="rounded-xl border border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/70 dark:bg-emerald-950/30 p-3.5 space-y-2">
+              <div className="flex items-center gap-1.5 font-bold text-emerald-900 dark:text-emerald-200">
+                <ShieldCheck className="h-4 w-4 text-emerald-600" />
+                <span>Eligibility Verified & Active</span>
+              </div>
+              <p className="text-emerald-800 dark:text-emerald-300 leading-normal">
+                {resource.eligibility_requirements}
+              </p>
+              <label className="flex items-start gap-2 pt-1 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={eligibilityConfirmed}
+                  onChange={(e) => setEligibilityConfirmed(e.target.checked)}
+                  className="mt-0.5 rounded border-emerald-400 text-indigo-600 focus:ring-indigo-500"
+                />
+                <span className="font-semibold text-zinc-800 dark:text-zinc-200">
+                  I certify that I hold verified credentials ({userCerts.join(', ') || 'Campus ID'}) and agree to standard laboratory safety protocols.
+                </span>
+              </label>
+            </div>
+          )}
+
           {errorMsg && (
             <div className="p-3 rounded-xl bg-red-50 dark:bg-red-950/50 border border-red-200 dark:border-red-900 text-xs text-red-700 dark:text-red-300 flex items-start gap-2">
               <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
               <span>{errorMsg}</span>
             </div>
           )}
-
-          {/* Eligibility Requirement Checklist */}
-          <div className="rounded-xl border border-amber-200 dark:border-amber-900/60 bg-amber-50/60 dark:bg-amber-950/30 p-3.5 space-y-2">
-            <div className="flex items-center gap-1.5 font-bold text-amber-900 dark:text-amber-200">
-              <ShieldCheck className="h-4 w-4 text-amber-600" />
-              <span>Pre-Booking Eligibility & Clearance Verification</span>
-            </div>
-            <p className="text-amber-800 dark:text-amber-300 leading-normal">
-              {resource.eligibility_requirements}
-            </p>
-            <label className="flex items-start gap-2 pt-1 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={eligibilityConfirmed}
-                onChange={(e) => setEligibilityConfirmed(e.target.checked)}
-                className="mt-0.5 rounded border-amber-400 text-indigo-600 focus:ring-indigo-500"
-              />
-              <span className="font-semibold text-zinc-800 dark:text-zinc-200">
-                I certify that I meet all stated prerequisite certifications and safety clearances.
-              </span>
-            </label>
-          </div>
 
           {/* Date & Time Select */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -190,8 +234,9 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
                 value={startDate}
                 min={startDate || undefined}
                 onChange={(e) => setStartDate(e.target.value)}
+                disabled={isEligibilityBlocked}
                 required
-                className="w-full text-xs rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 px-3 py-2 text-zinc-900 dark:text-white"
+                className="w-full text-xs rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 px-3 py-2 text-zinc-900 dark:text-white disabled:opacity-50"
               />
             </div>
             <div>
@@ -202,8 +247,9 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
                 type="time"
                 value={startTime}
                 onChange={(e) => setStartTime(e.target.value)}
+                disabled={isEligibilityBlocked}
                 required
-                className="w-full text-xs rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 px-3 py-2 text-zinc-900 dark:text-white"
+                className="w-full text-xs rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 px-3 py-2 text-zinc-900 dark:text-white disabled:opacity-50"
               />
             </div>
             <div>
@@ -214,8 +260,9 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
                 type="time"
                 value={endTime}
                 onChange={(e) => setEndTime(e.target.value)}
+                disabled={isEligibilityBlocked}
                 required
-                className="w-full text-xs rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 px-3 py-2 text-zinc-900 dark:text-white"
+                className="w-full text-xs rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 px-3 py-2 text-zinc-900 dark:text-white disabled:opacity-50"
               />
             </div>
           </div>
@@ -275,7 +322,7 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
             </div>
           </div>
 
-          {/* Academic / Research Purpose */}
+          {/* Purpose */}
           <div>
             <label className="block font-semibold text-zinc-700 dark:text-zinc-300 mb-1">
               Academic & Research Justification
@@ -284,9 +331,10 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
               rows={3}
               value={purpose}
               onChange={(e) => setPurpose(e.target.value)}
+              disabled={isEligibilityBlocked}
               placeholder="State project details, faculty advisor or capstone scope (e.g. Senior Capstone: High-Speed Optical Dispersion Characterization)."
               required
-              className="w-full text-xs rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 p-3 text-zinc-900 dark:text-white placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              className="w-full text-xs rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 p-3 text-zinc-900 dark:text-white placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50"
             />
           </div>
 
@@ -301,11 +349,24 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
             </button>
             <button
               type="submit"
-              disabled={submitting || isCapExceeded || !eligibilityConfirmed}
-              className="flex items-center gap-1.5 px-5 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-semibold rounded-xl shadow-xs transition-colors cursor-pointer"
+              disabled={submitting || isCapExceeded || isEligibilityBlocked || !eligibilityConfirmed}
+              className={`flex items-center gap-1.5 px-5 py-2 font-semibold rounded-xl shadow-xs transition-colors cursor-pointer ${
+                isEligibilityBlocked
+                  ? 'bg-zinc-400 text-white cursor-not-allowed opacity-60'
+                  : 'bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white'
+              }`}
             >
-              <Send className="h-3.5 w-3.5" />
-              <span>{submitting ? 'Submitting...' : overlappingBooking ? 'Join Priority Waitlist' : 'Submit Reservation'}</span>
+              {isEligibilityBlocked ? (
+                <>
+                  <Lock className="h-3.5 w-3.5" />
+                  <span>Blocked: Missing Required Certification</span>
+                </>
+              ) : (
+                <>
+                  <Send className="h-3.5 w-3.5" />
+                  <span>{submitting ? 'Submitting...' : overlappingBooking ? 'Join Priority Waitlist' : 'Submit Reservation'}</span>
+                </>
+              )}
             </button>
           </div>
         </form>

@@ -14,7 +14,10 @@ import {
   X,
   PlusCircle,
   Cpu,
-  RotateCcw
+  RotateCcw,
+  LogIn,
+  ShieldAlert,
+  User
 } from 'lucide-react';
 import { Profile, UserRole } from '@/lib/types';
 
@@ -62,7 +65,7 @@ export const Navbar: React.FC<NavbarProps> = ({
     }
   };
 
-  const isCapWarning = weeklyHours >= (currentProfile.weekly_hours_cap * 0.8);
+  const isUser2 = currentProfile.email === 'user2@demo.com';
 
   return (
     <header className="sticky top-0 z-40 w-full border-b border-zinc-200 bg-white/95 backdrop-blur shadow-xs dark:border-zinc-800 dark:bg-zinc-900/95">
@@ -129,11 +132,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             {/* Weekly Cap Indicator */}
             <div 
               title={`Weekly quota: ${weeklyHours.toFixed(1)}h booked out of ${currentProfile.weekly_hours_cap}h allowed`}
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${
-                isCapWarning 
-                  ? 'bg-amber-50 text-amber-800 border-amber-300 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-700' 
-                  : 'bg-zinc-50 text-zinc-700 border-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:border-zinc-700'
-              }`}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border bg-zinc-50 text-zinc-700 border-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:border-zinc-700"
             >
               <Clock className="h-3.5 w-3.5 text-zinc-400" />
               <span>
@@ -152,31 +151,48 @@ export const Navbar: React.FC<NavbarProps> = ({
               </button>
             )}
 
+            {/* Login Link */}
+            <Link
+              href="/login"
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+            >
+              <LogIn className="h-3.5 w-3.5" />
+              <span>Auth Desk</span>
+            </Link>
+
             {/* Persona Switcher Dropdown */}
             <div className="relative">
               <button
                 onClick={() => setRoleDropdownOpen(!roleDropdownOpen)}
-                className="flex items-center gap-2 pl-2 pr-3 py-1 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700/60 transition-colors cursor-pointer text-left"
+                className={`flex items-center gap-2 pl-2 pr-3 py-1 rounded-lg border transition-colors cursor-pointer text-left ${
+                  isUser2
+                    ? 'border-red-400 bg-red-50 text-red-900 dark:bg-red-950/60 dark:text-red-200 dark:border-red-800'
+                    : 'border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 hover:bg-zinc-100'
+                }`}
               >
                 <div className="h-7 w-7 rounded-full bg-indigo-100 text-indigo-700 dark:bg-indigo-900/60 dark:text-indigo-300 flex items-center justify-center font-bold text-xs">
                   {currentProfile.full_name.charAt(0)}
                 </div>
                 <div>
-                  <div className="text-xs font-semibold text-zinc-800 dark:text-zinc-200 leading-tight">
-                    {currentProfile.full_name}
+                  <div className="text-xs font-semibold leading-tight flex items-center gap-1">
+                    <span className="truncate max-w-[120px]">{currentProfile.full_name}</span>
+                    {isUser2 && <ShieldAlert className="h-3.5 w-3.5 text-red-600 shrink-0" />}
                   </div>
-                  <div className="flex items-center gap-1">
-                    <span className={`text-[10px] uppercase font-bold tracking-wider px-1 rounded border ${getRoleBadgeColor(currentProfile.role)}`}>
+                  <div className="flex items-center gap-1 mt-0.5">
+                    <span className={`text-[9px] uppercase font-bold tracking-wider px-1 rounded border ${getRoleBadgeColor(currentProfile.role)}`}>
                       {currentProfile.role}
+                    </span>
+                    <span className="text-[10px] text-zinc-400 font-mono">
+                      {currentProfile.email}
                     </span>
                   </div>
                 </div>
               </button>
 
               {roleDropdownOpen && (
-                <div className="absolute right-0 mt-2 w-72 rounded-xl bg-white dark:bg-zinc-900 shadow-xl border border-zinc-200 dark:border-zinc-800 p-2 z-50">
+                <div className="absolute right-0 mt-2 w-80 rounded-2xl bg-white dark:bg-zinc-900 shadow-2xl border border-zinc-200 dark:border-zinc-800 p-2 z-50">
                   <div className="px-2 py-1.5 border-b border-zinc-100 dark:border-zinc-800 text-[11px] font-semibold text-zinc-400 uppercase tracking-wider flex items-center justify-between">
-                    <span>Switch Test Persona & Role</span>
+                    <span>Switch Test Persona (Real Supabase Auth)</span>
                     {onResetDemoData && (
                       <button
                         onClick={() => {
@@ -191,28 +207,48 @@ export const Navbar: React.FC<NavbarProps> = ({
                     )}
                   </div>
                   <div className="space-y-1 mt-1">
-                    {profiles.map((p) => (
-                      <button
-                        key={p.id}
-                        onClick={() => {
-                          onSwitchProfile(p.id);
-                          setRoleDropdownOpen(false);
-                        }}
-                        className={`w-full text-left p-2 rounded-lg flex items-center justify-between text-xs transition-colors cursor-pointer ${
-                          p.id === currentProfile.id
-                            ? 'bg-indigo-50 text-indigo-900 font-semibold dark:bg-indigo-950/60 dark:text-indigo-200'
-                            : 'hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300'
-                        }`}
-                      >
-                        <div>
-                          <div className="font-medium">{p.full_name}</div>
-                          <div className="text-[10px] text-zinc-400">{p.department}</div>
-                        </div>
-                        <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded border ${getRoleBadgeColor(p.role)}`}>
-                          {p.role}
-                        </span>
-                      </button>
-                    ))}
+                    {profiles.map((p) => {
+                      const isUncertified = p.email === 'user2@demo.com';
+                      return (
+                        <button
+                          key={p.id}
+                          onClick={() => {
+                            onSwitchProfile(p.email || p.id);
+                            setRoleDropdownOpen(false);
+                          }}
+                          className={`w-full text-left p-2.5 rounded-xl flex items-center justify-between text-xs transition-colors cursor-pointer ${
+                            p.email === currentProfile.email
+                              ? 'bg-indigo-50 text-indigo-900 font-semibold dark:bg-indigo-950/60 dark:text-indigo-200'
+                              : 'hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300'
+                          }`}
+                        >
+                          <div>
+                            <div className="font-semibold flex items-center gap-1">
+                              <span>{p.full_name}</span>
+                              {isUncertified && (
+                                <span className="text-[9px] px-1 rounded bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300 font-bold">
+                                  No Certs
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[10px] text-zinc-400 font-mono">{p.email}</div>
+                          </div>
+                          <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded border ${getRoleBadgeColor(p.role)}`}>
+                            {p.role}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <div className="pt-2 mt-2 border-t border-zinc-100 dark:border-zinc-800">
+                    <Link
+                      href="/login"
+                      onClick={() => setRoleDropdownOpen(false)}
+                      className="block text-center py-1.5 text-xs text-indigo-600 dark:text-indigo-400 font-semibold hover:underline"
+                    >
+                      Open Full Supabase Login Desk &rarr;
+                    </Link>
                   </div>
                 </div>
               )}
@@ -255,35 +291,30 @@ export const Navbar: React.FC<NavbarProps> = ({
                 </Link>
               );
             })}
-          </div>
-
-          {onOpenArchitecture && (
-            <button
-              onClick={() => {
-                onOpenArchitecture();
-                setMobileMenuOpen(false);
-              }}
-              className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+            <Link
+              href="/login"
+              onClick={() => setMobileMenuOpen(false)}
+              className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-indigo-600"
             >
-              <Cpu className="h-4 w-4 text-indigo-500" />
-              <span>System Architecture & Governance Blueprint</span>
-            </button>
-          )}
+              <LogIn className="h-5 w-5" />
+              <span>Supabase Auth Desk</span>
+            </Link>
+          </div>
 
           <div className="pt-3 border-t border-zinc-100 dark:border-zinc-800">
             <div className="text-xs font-medium text-zinc-500 mb-2">
-              Active Persona: <strong>{currentProfile.full_name}</strong> ({currentProfile.role})
+              Active Persona: <strong>{currentProfile.full_name}</strong> ({currentProfile.email})
             </div>
             <div className="grid grid-cols-2 gap-2">
               {profiles.map((p) => (
                 <button
                   key={p.id}
                   onClick={() => {
-                    onSwitchProfile(p.id);
+                    onSwitchProfile(p.email || p.id);
                     setMobileMenuOpen(false);
                   }}
                   className={`p-2 rounded border text-left text-xs ${
-                    p.id === currentProfile.id
+                    p.email === currentProfile.email
                       ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-950 font-semibold'
                       : 'border-zinc-200 dark:border-zinc-700'
                   }`}

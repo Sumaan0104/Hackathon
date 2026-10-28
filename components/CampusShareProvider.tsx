@@ -23,6 +23,7 @@ import {
   getWaitlistQueueAction,
   resetDemoDataAction
 } from '@/lib/actions';
+import { createClient } from '@/lib/supabase/client';
 import { Navbar } from './Navbar';
 import { BookingRequestModal } from './BookingRequestModal';
 import { BookingDecisionModal } from './BookingDecisionModal';
@@ -42,7 +43,7 @@ interface CampusShareContextType {
   auditLogs: AuditLogEntry[];
   weeklyHours: number;
   loading: boolean;
-  switchProfile: (profileId: string) => Promise<void>;
+  switchProfile: (profileIdOrEmail: string) => Promise<void>;
   openBookingModal: (resource: Resource) => void;
   openDecisionModal: (booking: Booking) => void;
   openWaitlistModal: (resource: Resource) => void;
@@ -65,11 +66,12 @@ export const useCampusShare = () => {
 export const CampusShareProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [currentProfile, setCurrentProfile] = useState<Profile>({
     id: 'user-1',
-    email: 'alex.rivera@college.edu',
-    full_name: 'Alex Rivera',
+    email: 'user1@demo.com',
+    full_name: 'Alex Rivera (Certified)',
     department: 'Electrical & Computer Engineering',
     role: 'user',
     weekly_hours_cap: 6.0,
+    certifications: ['Laser Safety Tier-2 Certification', 'Field Camera Operations', 'Makerspace Safety'],
     created_at: '2026-09-01T08:00:00Z',
   });
 
@@ -103,10 +105,10 @@ export const CampusShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
     setTimeout(() => setToast(null), 4500);
   };
 
-  const loadData = async (profileId?: string) => {
+  const loadData = async (profileIdOrEmail?: string) => {
     try {
       setLoading(true);
-      const data = await fetchAllData(profileId || currentProfile.id);
+      const data = await fetchAllData(profileIdOrEmail || currentProfile.email || currentProfile.id);
       setCurrentProfile(data.currentProfile);
       setProfiles(data.profiles);
       setResources(data.resources);
@@ -122,13 +124,41 @@ export const CampusShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
   };
 
   useEffect(() => {
-    loadData();
+    // Check if Supabase has an active session on mount
+    const checkSupabaseSession = async () => {
+      try {
+        const supabase = createClient();
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session && session.user && session.user.email) {
+          await loadData(session.user.email);
+          return;
+        }
+      } catch (e) {
+        // Fall back to default profile
+      }
+      loadData();
+    };
+    checkSupabaseSession();
   }, []);
 
-  const switchProfile = async (profileId: string) => {
-    await loadData(profileId);
-    const target = profiles.find((p) => p.id === profileId);
-    showToast(`Persona active: ${target?.full_name || profileId} (${target?.role || 'user'})`, 'info');
+  const switchProfile = async (profileIdOrEmail: string) => {
+    // Attempt real Supabase Auth session login in the background for demo accounts
+    try {
+      const email = profileIdOrEmail.includes('@') ? profileIdOrEmail : profiles.find(p => p.id === profileIdOrEmail)?.email;
+      if (email) {
+        const supabase = createClient();
+        await supabase.auth.signInWithPassword({
+          email,
+          password: 'DemoPassword123!',
+        });
+      }
+    } catch (e) {
+      // In-memory or fallback profile switch
+    }
+
+    await loadData(profileIdOrEmail);
+    const target = profiles.find((p) => p.id === profileIdOrEmail || p.email === profileIdOrEmail);
+    showToast(`Active persona: ${target?.full_name || profileIdOrEmail} (${target?.role || 'user'})`, 'info');
   };
 
   // Handler for booking request
@@ -138,8 +168,8 @@ export const CampusShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
     endTime: string, 
     purpose: string
   ) => {
-    const res = await requestBookingAction(currentProfile.id, resourceId, startTime, endTime, purpose);
-    await loadData(currentProfile.id);
+    const res = await requestBookingAction(currentProfile.email || currentProfile.id, resourceId, startTime, endTime, purpose);
+    await loadData(currentProfile.email || currentProfile.id);
     if (res.waitlisted) {
       showToast(`Schedule clash detected: Placed on Fair-Access Waitlist (#1 priority queue)!`, 'info');
     } else {
@@ -153,22 +183,22 @@ export const CampusShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
     decision: 'approved' | 'rejected' | 'waitlisted',
     writtenReason: string
   ) => {
-    await updateBookingDecisionAction(currentProfile.id, bookingId, decision, writtenReason);
-    await loadData(currentProfile.id);
+    await updateBookingDecisionAction(currentProfile.email || currentProfile.id, bookingId, decision, writtenReason);
+    await loadData(currentProfile.email || currentProfile.id);
     showToast(`Decision recorded: ${decision.toUpperCase()} with mandatory written justification.`, 'success');
   };
 
   // Handler for check-in with checklist
   const handleCheckInSubmit = async (bookingId: string, notes: string, checklist: InspectionChecklist) => {
-    await checkInAction(currentProfile.id, bookingId, notes, checklist);
-    await loadData(currentProfile.id);
+    await checkInAction(currentProfile.email || currentProfile.id, bookingId, notes, checklist);
+    await loadData(currentProfile.email || currentProfile.id);
     showToast('Arrival check-in confirmed & physical inspection logged to audit trail.', 'success');
   };
 
   // Handler for return with checklist
   const handleReturnSubmit = async (bookingId: string, notes: string, checklist: InspectionChecklist) => {
-    await returnAction(currentProfile.id, bookingId, notes, checklist);
-    await loadData(currentProfile.id);
+    await returnAction(currentProfile.email || currentProfile.id, bookingId, notes, checklist);
+    await loadData(currentProfile.email || currentProfile.id);
     showToast('Departure verified: Equipment returned in good standing!', 'success');
   };
 
@@ -179,22 +209,22 @@ export const CampusShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
     severity: IncidentSeverity, 
     description: string
   ) => {
-    await reportIncidentAction(currentProfile.id, bookingId, type, severity, description);
-    await loadData(currentProfile.id);
+    await reportIncidentAction(currentProfile.email || currentProfile.id, bookingId, type, severity, description);
+    await loadData(currentProfile.email || currentProfile.id);
     showToast(`Incident report recorded. No automated penalty applied under campus policy.`, 'info');
   };
 
   // Handler for resource creation
   const handleCreateResourceSubmit = async (data: any) => {
-    await createResourceAction(currentProfile.id, data);
-    await loadData(currentProfile.id);
+    await createResourceAction(currentProfile.email || currentProfile.id, data);
+    await loadData(currentProfile.email || currentProfile.id);
     showToast(`Resource "${data.name}" listed successfully.`, 'success');
   };
 
   // Reset demo fixtures
   const handleResetDemoData = async () => {
-    await resetDemoDataAction(currentProfile.id);
-    await loadData(currentProfile.id);
+    await resetDemoDataAction(currentProfile.email || currentProfile.id);
+    await loadData(currentProfile.email || currentProfile.id);
     showToast('Demonstration data & fixtures reset to factory baseline.', 'info');
   };
 
@@ -298,7 +328,7 @@ export const CampusShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
         <footer className="border-t border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 py-6 text-center text-xs text-zinc-500">
           <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-3">
             <div>
-              CampusShare — Platform for sharing underused labs, equipment & spaces. All decisions logged to <code className="text-indigo-600 dark:text-indigo-400 font-mono">audit_log</code>.
+              CampusShare — Shared Labs, Equipment & Spaces. All decisions logged to <code className="text-indigo-600 dark:text-indigo-400 font-mono">audit_log</code>.
             </div>
             <button
               onClick={openArchitectureModal}

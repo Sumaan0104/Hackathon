@@ -1,3 +1,5 @@
+import fs from 'fs';
+import path from 'path';
 import { 
   Booking, 
   BookingStatus, 
@@ -18,6 +20,19 @@ import {
   MOCK_AUDIT_LOGS 
 } from './mock-data';
 
+// Server-side shared file persistence path:
+// Ensures multi-device testing (owner on Device 1, user on Device 2) shares the exact same database state!
+const DB_FILE_DIR = path.join(process.cwd(), '.data');
+const DB_FILE_PATH = path.join(DB_FILE_DIR, 'shared_db.json');
+
+interface PersistedState {
+  profiles: Record<string, Profile>;
+  resources: Resource[];
+  bookings: Booking[];
+  incidents: IncidentReport[];
+  auditLogs: AuditLogEntry[];
+}
+
 class CampusShareStore {
   private profiles: Map<string, Profile> = new Map();
   private resources: Map<string, Resource> = new Map();
@@ -26,7 +41,63 @@ class CampusShareStore {
   private auditLogs: AuditLogEntry[] = [];
 
   constructor() {
+    this.init();
+  }
+
+  private init() {
+    if (this.loadFromDisk()) {
+      return;
+    }
     this.seed();
+    this.saveToDisk();
+  }
+
+  private loadFromDisk(): boolean {
+    try {
+      if (fs.existsSync(DB_FILE_PATH)) {
+        const raw = fs.readFileSync(DB_FILE_PATH, 'utf-8');
+        const data: PersistedState = JSON.parse(raw);
+        
+        this.profiles.clear();
+        this.resources.clear();
+        this.bookings.clear();
+        this.incidents.clear();
+
+        Object.values(data.profiles).forEach((p) => this.profiles.set(p.id, p));
+        data.resources.forEach((r) => this.resources.set(r.id, r));
+        data.bookings.forEach((b) => this.bookings.set(b.id, b));
+        data.incidents.forEach((inc) => this.incidents.set(inc.id, inc));
+        this.auditLogs = data.auditLogs || [];
+
+        // Ensure user-2 exists in loaded profiles
+        if (!this.profiles.has('user-2')) {
+          this.profiles.set('user-2', MOCK_PROFILES['user-2']);
+          this.saveToDisk();
+        }
+        return true;
+      }
+    } catch (e) {
+      console.warn('Could not load shared_db.json, re-seeding...', e);
+    }
+    return false;
+  }
+
+  private saveToDisk() {
+    try {
+      if (!fs.existsSync(DB_FILE_DIR)) {
+        fs.mkdirSync(DB_FILE_DIR, { recursive: true });
+      }
+      const data: PersistedState = {
+        profiles: Object.fromEntries(this.profiles.entries()),
+        resources: Array.from(this.resources.values()),
+        bookings: Array.from(this.bookings.values()),
+        incidents: Array.from(this.incidents.values()),
+        auditLogs: this.auditLogs,
+      };
+      fs.writeFileSync(DB_FILE_PATH, JSON.stringify(data, null, 2), 'utf-8');
+    } catch (e) {
+      console.warn('Could not write to shared_db.json:', e);
+    }
   }
 
   public seed() {
@@ -41,23 +112,45 @@ class CampusShareStore {
     MOCK_BOOKINGS.forEach((b) => this.bookings.set(b.id, { ...b }));
     MOCK_INCIDENTS.forEach((inc) => this.incidents.set(inc.id, { ...inc }));
     this.auditLogs = [...MOCK_AUDIT_LOGS];
+
+    this.saveToDisk();
   }
 
   // --- Profiles ---
   getProfile(id: string): Profile | undefined {
+    this.loadFromDisk();
     return this.profiles.get(id);
   }
 
+  getProfileByEmail(email: string): Profile | undefined {
+    this.loadFromDisk();
+    for (const p of this.profiles.values()) {
+      if (p.email.toLowerCase() === email.toLowerCase()) {
+        return p;
+      }
+    }
+    return undefined;
+  }
+
+  upsertProfile(profile: Profile): Profile {
+    this.profiles.set(profile.id, profile);
+    this.saveToDisk();
+    return profile;
+  }
+
   getAllProfiles(): Profile[] {
+    this.loadFromDisk();
     return Array.from(this.profiles.values());
   }
 
   // --- Resources ---
   getResources(): Resource[] {
+    this.loadFromDisk();
     return Array.from(this.resources.values());
   }
 
   getResource(id: string): Resource | undefined {
+    this.loadFromDisk();
     return this.resources.get(id);
   }
 
@@ -80,7 +173,6 @@ class CampusShareStore {
     };
 
     this.resources.set(newResource.id, newResource);
-
     this.logAction(actor, 'RESOURCE_CREATED', 'resource', newResource.id, {
       name: newResource.name,
       type: newResource.type,
@@ -88,12 +180,14 @@ class CampusShareStore {
       capacity: newResource.capacity,
     });
 
+    this.saveToDisk();
     return newResource;
   }
 
   // --- Bookings & Validation Rules ---
 
   getUserWeeklyBookedHours(userId: string, targetDateStr: string, excludeBookingId?: string): number {
+    this.loadFromDisk();
     const targetDate = new Date(targetDateStr);
     
     // ISO week calculation (Monday to Sunday)
@@ -122,6 +216,7 @@ class CampusShareStore {
   }
 
   findBookingClash(resourceId: string, startTimeStr: string, endTimeStr: string, excludeBookingId?: string): Booking | null {
+    this.loadFromDisk();
     const start = new Date(startTimeStr).getTime();
     const end = new Date(endTimeStr).getTime();
 
@@ -141,6 +236,12 @@ class CampusShareStore {
     return null;
   }
 
+  /**
+   * Request a booking.
+   * STRICT SERVER-SIDE ELIGIBILITY CHECK:
+   * Checks actor.certifications against resource.required_certifications.
+   * If missing, BLOCKS the booking and states what is missing.
+   */
   requestBooking(
     actor: Profile, 
     resourceId: string, 
@@ -148,9 +249,32 @@ class CampusShareStore {
     endTime: string, 
     purpose: string
   ): { booking: Booking; waitlisted: boolean; warning?: string; clashingWith?: string } {
+    this.loadFromDisk();
     const resource = this.resources.get(resourceId);
     if (!resource) throw new Error('Resource not found.');
     if (!resource.is_active) throw new Error('Resource is currently inactive for maintenance.');
+
+    // 1. STRICT ELIGIBILITY CHECK
+    if (resource.required_certifications && resource.required_certifications.length > 0) {
+      const userCerts = actor.certifications || [];
+      const missingCerts = resource.required_certifications.filter(
+        (cert) => !userCerts.includes(cert)
+      );
+
+      if (missingCerts.length > 0) {
+        const errorMsg = `Eligibility Blocked: You do not have the required certification(s): "${missingCerts.join(', ')}". Current certifications on file: ${userCerts.length > 0 ? userCerts.join(', ') : 'None'}. Please complete the required training before requesting this resource.`;
+        
+        // Log the failed eligibility attempt to audit log
+        this.logAction(actor, 'BOOKING_ELIGIBILITY_BLOCKED', 'resource', resourceId, {
+          resource_name: resource.name,
+          missing_certifications: missingCerts,
+          user_certifications: userCerts,
+        });
+        this.saveToDisk();
+
+        throw new Error(errorMsg);
+      }
+    }
 
     const start = new Date(startTime);
     const end = new Date(endTime);
@@ -172,7 +296,7 @@ class CampusShareStore {
 
     if (currentWeekHours + durationHours > userCap) {
       throw new Error(
-        `Weekly quota exceeded: You have ${currentWeekHours.toFixed(1)}h booked this week. Requesting ${durationHours.toFixed(1)}h would exceed your quota of ${userCap}h.`
+        `Weekly quota exceeded: You have ${currentWeekHours.toFixed(1)}h booked this week. Requesting ${durationHours.toFixed(1)}h would reach ${(currentWeekHours + durationHours).toFixed(1)}h, exceeding your weekly quota of ${userCap}h.`
       );
     }
 
@@ -214,6 +338,8 @@ class CampusShareStore {
       clash_detected: clash,
     });
 
+    this.saveToDisk();
+
     return { 
       booking: newBooking, 
       waitlisted: clash, 
@@ -228,6 +354,7 @@ class CampusShareStore {
     decision: 'approved' | 'rejected' | 'waitlisted',
     writtenReason: string
   ): Booking {
+    this.loadFromDisk();
     const booking = this.bookings.get(bookingId);
     if (!booking) throw new Error('Booking not found.');
 
@@ -269,6 +396,7 @@ class CampusShareStore {
       borrower_name: booking.user_name,
     });
 
+    this.saveToDisk();
     return booking;
   }
 
@@ -278,6 +406,7 @@ class CampusShareStore {
     conditionNotes: string, 
     checklist?: InspectionChecklist
   ): Booking {
+    this.loadFromDisk();
     const booking = this.bookings.get(bookingId);
     if (!booking) throw new Error('Booking not found.');
 
@@ -316,6 +445,7 @@ class CampusShareStore {
       checklist: booking.checkin_checklist,
     });
 
+    this.saveToDisk();
     return booking;
   }
 
@@ -325,6 +455,7 @@ class CampusShareStore {
     conditionNotes: string, 
     checklist?: InspectionChecklist
   ): Booking {
+    this.loadFromDisk();
     const booking = this.bookings.get(bookingId);
     if (!booking) throw new Error('Booking not found.');
 
@@ -363,6 +494,7 @@ class CampusShareStore {
       checklist: booking.return_checklist,
     });
 
+    this.saveToDisk();
     return booking;
   }
 
@@ -373,6 +505,7 @@ class CampusShareStore {
     severity: IncidentSeverity,
     description: string
   ): IncidentReport {
+    this.loadFromDisk();
     const booking = this.bookings.get(bookingId);
     if (!booking) throw new Error('Booking not found.');
 
@@ -413,10 +546,12 @@ class CampusShareStore {
       governance_policy: 'Logged for review. No automated penalties applied.',
     });
 
+    this.saveToDisk();
     return incident;
   }
 
   getWaitlistByLeastRecentUse(resourceId: string): Array<Booking & { lastUsedAt: string | null; priorityScore: number }> {
+    this.loadFromDisk();
     const waitlisted = Array.from(this.bookings.values()).filter(
       (b) => b.resource_id === resourceId && b.status === 'waitlisted'
     );
@@ -444,6 +579,7 @@ class CampusShareStore {
   }
 
   getBookings(): Booking[] {
+    this.loadFromDisk();
     return Array.from(this.bookings.values()).map((b) => ({
       ...b,
       resource: this.resources.get(b.resource_id),
@@ -451,12 +587,14 @@ class CampusShareStore {
   }
 
   getIncidents(): IncidentReport[] {
+    this.loadFromDisk();
     return Array.from(this.incidents.values()).sort(
       (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
     );
   }
 
   getAuditLogs(): AuditLogEntry[] {
+    this.loadFromDisk();
     return [...this.auditLogs].sort(
       (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
     );

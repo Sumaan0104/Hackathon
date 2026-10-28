@@ -22,6 +22,7 @@ export interface Profile {
   department: string;
   role: UserRole;
   weekly_hours_cap: number; // default 6h
+  certifications: string[]; // e.g. ["Laser Safety Tier-2 Certification"]
   avatar_url?: string;
   created_at: string;
 }
@@ -37,12 +38,13 @@ export interface Resource {
   location: string;
   capacity: number;
   eligibility_requirements: string;
+  required_certifications: string[]; // specific certs required to book
   is_active: boolean;
   image_url?: string;
   specs?: string[];
   safety_tier?: number;
   available_hours?: string;
-  utilization_rate?: number; // e.g. 78%
+  utilization_rate?: number;
   created_at: string;
 }
 
