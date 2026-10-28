@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import Link from 'next/link';
 import { useCampusShare } from '@/components/CampusShareProvider';
 import { Booking, BookingStatus } from '@/lib/types';
 import { 
@@ -338,14 +339,22 @@ export default function BookingsPage() {
       {/* OWNER REVIEW PORTAL */}
       {activeTab === 'owner' && (
         <div className="space-y-4">
-          <div className="p-3.5 rounded-2xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/60 text-xs text-amber-900 dark:text-amber-200 flex items-start gap-2.5">
-            <ShieldAlert className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
-            <div>
-              <strong>Custodian Decision Authority & Transparency</strong>
-              <div className="text-[11px] text-amber-800 dark:text-amber-300 mt-0.5">
-                Every Approve, Reject, or Waitlist decision requires a written reason that is permanently recorded in the audit trail and presented to the student borrower.
+          <div className="p-3.5 rounded-2xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/60 text-xs text-amber-900 dark:text-amber-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-start gap-2.5">
+              <ShieldAlert className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+              <div>
+                <strong>Custodian Decision Authority & Transparency</strong>
+                <div className="text-[11px] text-amber-800 dark:text-amber-300 mt-0.5">
+                  Every Approve, Reject, or Waitlist decision requires a written reason of at least 10 characters that is permanently recorded in the audit trail.
+                </div>
               </div>
             </div>
+            <Link
+              href="/owner/requests"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-semibold shadow-xs self-start sm:self-auto shrink-0 transition-colors"
+            >
+              <span>Dedicated /owner/requests Portal &rarr;</span>
+            </Link>
           </div>
 
           {ownerBookings.length === 0 ? (

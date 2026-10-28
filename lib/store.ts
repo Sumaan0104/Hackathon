@@ -10,7 +10,8 @@ import {
   UserRole,
   InspectionChecklist,
   IncidentType,
-  IncidentSeverity
+  IncidentSeverity,
+  InAppNotification
 } from './types';
 import { 
   MOCK_PROFILES, 
@@ -29,6 +30,7 @@ interface PersistedState {
   bookings: Booking[];
   incidents: IncidentReport[];
   auditLogs: AuditLogEntry[];
+  notifications?: InAppNotification[];
 }
 
 export interface BookingValidationResult {
@@ -49,6 +51,7 @@ class CampusShareStore {
   private bookings: Map<string, Booking> = new Map();
   private incidents: Map<string, IncidentReport> = new Map();
   private auditLogs: AuditLogEntry[] = [];
+  private notifications: Map<string, InAppNotification> = new Map();
 
   constructor() {
     this.init();
@@ -72,12 +75,14 @@ class CampusShareStore {
         this.resources.clear();
         this.bookings.clear();
         this.incidents.clear();
+        this.notifications.clear();
 
         Object.values(data.profiles).forEach((p) => this.profiles.set(p.id, p));
         data.resources.forEach((r) => this.resources.set(r.id, r));
         data.bookings.forEach((b) => this.bookings.set(b.id, b));
         data.incidents.forEach((inc) => this.incidents.set(inc.id, inc));
         this.auditLogs = data.auditLogs || [];
+        (data.notifications || []).forEach((n) => this.notifications.set(n.id, n));
 
         // Ensure user-2 exists in loaded profiles
         if (!this.profiles.has('user-2')) {
@@ -115,6 +120,7 @@ class CampusShareStore {
         bookings: Array.from(this.bookings.values()),
         incidents: Array.from(this.incidents.values()),
         auditLogs: this.auditLogs,
+        notifications: Array.from(this.notifications.values()),
       };
       fs.writeFileSync(DB_FILE_PATH, JSON.stringify(data, null, 2), 'utf-8');
     } catch (e) {
@@ -127,6 +133,7 @@ class CampusShareStore {
     this.resources.clear();
     this.bookings.clear();
     this.incidents.clear();
+    this.notifications.clear();
     this.auditLogs = [];
 
     Object.values(MOCK_PROFILES).forEach((p) => this.profiles.set(p.id, { ...p }));
@@ -536,31 +543,47 @@ class CampusShareStore {
     bookingId: string,
     decision: 'approved' | 'rejected' | 'waitlisted',
     writtenReason: string
-  ): Booking {
+  ): { booking: Booking; waitlistPosition?: number; notification?: InAppNotification } {
     this.loadFromDisk();
     const booking = this.bookings.get(bookingId);
-    if (!booking) throw new Error('Booking not found.');
+    if (!booking) throw new Error('Booking record not found.');
 
     const resource = this.resources.get(booking.resource_id);
-    if (!resource) throw new Error('Resource not found.');
+    if (!resource) throw new Error('Resource facility record not found.');
 
-    // Server Role Check
-    const isOwner = resource.owner_id === actor.id;
+    // Server Role Check: only owner, manager, or admin can decide
+    const isOwner = resource.owner_id === actor.id || resource.owner_name === actor.full_name;
     const isPrivileged = ['manager', 'admin'].includes(actor.role);
     if (!isOwner && !isPrivileged) {
-      throw new Error('Unauthorized: Only resource owners, managers, or admins can authorize booking decisions.');
+      throw new Error('Unauthorized Access: Server policy permits only facility custodians, managers, or admins to review bookings.');
     }
 
-    // MANDATORY RULE: Written reason required
-    if (!writtenReason || writtenReason.trim().length < 5) {
-      throw new Error('Compliance Violation: Every approve, reject, or waitlist decision must provide a written reason of at least 5 characters shown to the borrower.');
+    // MANDATORY RULE: Written reason required of at least 10 characters
+    if (!writtenReason || writtenReason.trim().length < 10) {
+      throw new Error(`Compliance Rule Violation: Every approve, reject, or waitlist decision must provide a written justification of at least 10 characters (provided: ${writtenReason ? writtenReason.trim().length : 0} characters).`);
     }
+
+    let waitlistPosition: number | undefined;
 
     if (decision === 'approved') {
+      // 1. Re-check clashes on the server
       const clash = this.findBookingClash(booking.resource_id, booking.start_time, booking.end_time, booking.id);
       if (clash) {
-        throw new Error(`Conflict Detected: Cannot approve because this slot overlaps with an approved booking by ${clash.user_name}.`);
+        const clashStart = new Date(clash.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const clashEnd = new Date(clash.end_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        throw new Error(`Schedule Conflict Detected: Cannot approve because this slot overlaps with an approved booking by ${clash.user_name} (${clashStart} – ${clashEnd}).`);
       }
+
+      // 2. Re-check weekly cap on the server
+      const borrower = this.profiles.get(booking.user_id) || this.getProfileByEmail(booking.user_email || '');
+      const userCap = borrower?.weekly_hours_cap ?? 6.0;
+      const currentWeekHours = this.getUserWeeklyBookedHours(booking.user_id, booking.start_time, booking.id);
+      if (currentWeekHours + booking.duration_hours > userCap) {
+        const hoursLeft = Math.max(0, userCap - currentWeekHours);
+        throw new Error(`Weekly Cap Violation: Approving this ${booking.duration_hours.toFixed(1)}h request would total ${(currentWeekHours + booking.duration_hours).toFixed(1)}h, exceeding the weekly cap of ${userCap.toFixed(1)} hours (${hoursLeft.toFixed(1)}h remaining).`);
+      }
+    } else if (decision === 'waitlisted') {
+      booking.clash_detected = true;
     }
 
     booking.status = decision;
@@ -571,16 +594,88 @@ class CampusShareStore {
 
     this.bookings.set(booking.id, booking);
 
+    if (decision === 'waitlisted') {
+      const queue = this.getWaitlistByLeastRecentUse(booking.resource_id);
+      const idx = queue.findIndex(q => q.id === booking.id);
+      waitlistPosition = idx >= 0 ? idx + 1 : 1;
+    }
+
+    // 4. Create In-App Notification for the borrower
+    const notifTitle = decision === 'approved' 
+      ? `Booking Approved: ${resource.name}`
+      : decision === 'rejected'
+      ? `Booking Rejected: ${resource.name}`
+      : `Placed on Waitlist (#${waitlistPosition || 1}): ${resource.name}`;
+
+    const notifMessage = decision === 'approved'
+      ? `Your reservation for ${resource.name} was approved by ${actor.full_name}. Stated reason: "${booking.status_reason}"`
+      : decision === 'rejected'
+      ? `Your reservation for ${resource.name} was declined by ${actor.full_name}. Stated reason: "${booking.status_reason}"`
+      : `Your reservation for ${resource.name} has been added to the Fair-Access Waitlist at position #${waitlistPosition || 1}. Stated reason: "${booking.status_reason}"`;
+
+    const notification: InAppNotification = {
+      id: `notif-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      user_id: booking.user_id,
+      booking_id: booking.id,
+      resource_name: resource.name,
+      type: decision === 'approved' ? 'booking_approved' : decision === 'rejected' ? 'booking_rejected' : 'booking_waitlisted',
+      title: notifTitle,
+      message: notifMessage,
+      reason: booking.status_reason,
+      read: false,
+      created_at: new Date().toISOString(),
+    };
+    this.notifications.set(notification.id, notification);
+
+    // 5. Write to audit_log per rule 5
     const actionName = decision === 'approved' ? 'BOOKING_APPROVED' : decision === 'rejected' ? 'BOOKING_REJECTED' : 'BOOKING_WAITLISTED';
     this.logAction(actor, actionName, 'booking', booking.id, {
       decision,
       written_reason: booking.status_reason,
       borrower_id: booking.user_id,
       borrower_name: booking.user_name,
+      resource_id: booking.resource_id,
+      resource_name: resource.name,
+      duration_hours: booking.duration_hours,
+      waitlist_position: waitlistPosition,
+      timestamp: booking.status_updated_at,
     });
 
     this.saveToDisk();
-    return booking;
+    return { booking, waitlistPosition, notification };
+  }
+
+  // --- Notification Helpers ---
+  getNotifications(userId: string): InAppNotification[] {
+    this.loadFromDisk();
+    return Array.from(this.notifications.values())
+      .filter((n) => n.user_id === userId)
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  }
+
+  markNotificationRead(notificationId: string): boolean {
+    this.loadFromDisk();
+    const notif = this.notifications.get(notificationId);
+    if (notif) {
+      notif.read = true;
+      this.notifications.set(notif.id, notif);
+      this.saveToDisk();
+      return true;
+    }
+    return false;
+  }
+
+  markAllNotificationsRead(userId: string): boolean {
+    this.loadFromDisk();
+    let updated = false;
+    this.notifications.forEach((n) => {
+      if (n.user_id === userId && !n.read) {
+        n.read = true;
+        updated = true;
+      }
+    });
+    if (updated) this.saveToDisk();
+    return updated;
   }
 
   checkIn(

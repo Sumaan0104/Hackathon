@@ -10,7 +10,8 @@ import {
   UserRole,
   IncidentType,
   IncidentSeverity,
-  InspectionChecklist
+  InspectionChecklist,
+  InAppNotification
 } from '@/lib/types';
 import { 
   fetchAllData, 
@@ -22,7 +23,8 @@ import {
   reportIncidentAction, 
   createResourceAction,
   getWaitlistQueueAction,
-  resetDemoDataAction
+  resetDemoDataAction,
+  markNotificationReadAction
 } from '@/lib/actions';
 import { createClient } from '@/lib/supabase/client';
 import { Navbar } from './Navbar';
@@ -45,6 +47,8 @@ interface CampusShareContextType {
   weeklyHours: number;
   loading: boolean;
   isDatabaseConnected: boolean;
+  notifications: InAppNotification[];
+  markNotificationRead: (id: string) => Promise<void>;
   switchProfile: (profileIdOrEmail: string) => Promise<void>;
   openBookingModal: (resource: Resource) => void;
   openDecisionModal: (booking: Booking) => void;
@@ -84,6 +88,7 @@ export const CampusShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
   const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([]);
   const [weeklyHours, setWeeklyHours] = useState<number>(0);
   const [isDatabaseConnected, setIsDatabaseConnected] = useState<boolean>(false);
+  const [notifications, setNotifications] = useState<InAppNotification[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Modals state
@@ -120,6 +125,7 @@ export const CampusShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
       setAuditLogs(data.auditLogs);
       setWeeklyHours(data.weeklyHours);
       setIsDatabaseConnected(Boolean(data.isDatabaseConnected));
+      setNotifications(data.notifications || []);
     } catch (e: any) {
       console.error('Error fetching data:', e);
     } finally {
@@ -245,6 +251,11 @@ export const CampusShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
     showToast('Demonstration data & fixtures reset to factory baseline.', 'info');
   };
 
+  const handleMarkNotificationRead = async (id: string) => {
+    await markNotificationReadAction(id);
+    setNotifications((prev) => prev.map((n) => n.id === id ? { ...n, read: true } : n));
+  };
+
   // Modal openers
   const openBookingModal = (resource: Resource) => {
     setSelectedResource(resource);
@@ -298,6 +309,8 @@ export const CampusShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
         weeklyHours,
         loading,
         isDatabaseConnected,
+        notifications,
+        markNotificationRead: handleMarkNotificationRead,
         switchProfile,
         openBookingModal,
         openDecisionModal,
@@ -316,6 +329,8 @@ export const CampusShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
           profiles={profiles}
           weeklyHours={weeklyHours}
           isDatabaseConnected={isDatabaseConnected}
+          notifications={notifications}
+          onMarkNotificationRead={handleMarkNotificationRead}
           onSwitchProfile={switchProfile}
           onOpenCreateResource={openCreateResourceModal}
           onOpenArchitecture={openArchitectureModal}

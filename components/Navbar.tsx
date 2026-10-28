@@ -18,15 +18,21 @@ import {
   LogIn,
   ShieldAlert,
   User,
-  Database
+  Database,
+  Bell,
+  ClipboardCheck,
+  CheckCircle,
+  XCircle
 } from 'lucide-react';
-import { Profile, UserRole } from '@/lib/types';
+import { Profile, UserRole, InAppNotification } from '@/lib/types';
 
 interface NavbarProps {
   currentProfile: Profile;
   profiles: Profile[];
   weeklyHours: number;
   isDatabaseConnected?: boolean;
+  notifications?: InAppNotification[];
+  onMarkNotificationRead?: (id: string) => void;
   onSwitchProfile: (profileId: string) => void;
   onOpenCreateResource?: () => void;
   onOpenArchitecture?: () => void;
@@ -38,6 +44,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   profiles,
   weeklyHours,
   isDatabaseConnected = false,
+  notifications = [],
+  onMarkNotificationRead,
   onSwitchProfile,
   onOpenCreateResource,
   onOpenArchitecture,
@@ -46,13 +54,19 @@ export const Navbar: React.FC<NavbarProps> = ({
   const pathname = usePathname();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [roleDropdownOpen, setRoleDropdownOpen] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+
+  const isOwnerOrAdmin = ['owner', 'manager', 'admin'].includes(currentProfile.role);
 
   const navLinks = [
     { href: '/', label: 'Explore Resources', icon: Layers },
     { href: '/bookings', label: 'Bookings & Reviews', icon: CalendarCheck },
+    ...(isOwnerOrAdmin ? [{ href: '/owner/requests', label: 'Owner Review Desk', icon: ClipboardCheck }] : []),
     { href: '/incidents', label: 'Incident Desk', icon: AlertTriangle },
     { href: '/audit', label: 'Audit Trail', icon: ShieldCheck },
   ];
+
+  const unreadNotifications = notifications.filter((n) => !n.read);
 
   const getRoleBadgeColor = (role: UserRole) => {
     switch (role) {
@@ -183,6 +197,81 @@ export const Navbar: React.FC<NavbarProps> = ({
               <span>Auth Desk</span>
             </Link>
 
+            {/* In-App Notifications Bell */}
+            <div className="relative">
+              <button
+                onClick={() => setNotificationsOpen(!notificationsOpen)}
+                className="relative p-2 rounded-lg text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+                title="In-App Notifications"
+              >
+                <Bell className="h-4 w-4" />
+                {unreadNotifications.length > 0 && (
+                  <span className="absolute top-1 right-1 h-2 w-2 rounded-full bg-rose-500 animate-pulse" />
+                )}
+              </button>
+
+              {notificationsOpen && (
+                <div className="absolute right-0 mt-2 w-80 rounded-2xl bg-white dark:bg-zinc-900 shadow-2xl border border-zinc-200 dark:border-zinc-800 p-3 z-50 text-xs">
+                  <div className="flex items-center justify-between pb-2 border-b border-zinc-100 dark:border-zinc-800">
+                    <span className="font-bold text-zinc-900 dark:text-white flex items-center gap-1.5">
+                      <Bell className="h-3.5 w-3.5 text-indigo-500" />
+                      <span>In-App Notifications</span>
+                    </span>
+                    <span className="text-[10px] text-zinc-400 font-mono">
+                      {unreadNotifications.length} unread
+                    </span>
+                  </div>
+
+                  <div className="py-2 space-y-2 max-h-72 overflow-y-auto">
+                    {notifications.length === 0 ? (
+                      <div className="py-6 text-center text-zinc-400 text-xs">
+                        No notifications yet.
+                      </div>
+                    ) : (
+                      notifications.map((n) => (
+                        <div
+                          key={n.id}
+                          className={`p-2.5 rounded-xl border text-[11px] transition-colors ${
+                            n.read
+                              ? 'bg-zinc-50 dark:bg-zinc-800/40 border-zinc-200/60 dark:border-zinc-700/60 text-zinc-600 dark:text-zinc-400'
+                              : 'bg-indigo-50/70 dark:bg-indigo-950/40 border-indigo-200 dark:border-indigo-800 text-zinc-900 dark:text-zinc-100'
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-1">
+                            <span className="font-bold block leading-tight">{n.title}</span>
+                            {!n.read && onMarkNotificationRead && (
+                              <button
+                                onClick={() => onMarkNotificationRead(n.id)}
+                                className="text-[9px] text-indigo-600 dark:text-indigo-400 hover:underline shrink-0"
+                              >
+                                mark read
+                              </button>
+                            )}
+                          </div>
+                          <p className="mt-1 text-[10px] italic text-zinc-600 dark:text-zinc-300">
+                            &ldquo;{n.reason}&rdquo;
+                          </p>
+                          <span className="text-[9px] text-zinc-400 block mt-1">
+                            {new Date(n.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+
+                  <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800 text-center">
+                    <Link
+                      href="/bookings"
+                      onClick={() => setNotificationsOpen(false)}
+                      className="text-[11px] text-indigo-600 dark:text-indigo-400 font-semibold hover:underline"
+                    >
+                      View in My Bookings &rarr;
+                    </Link>
+                  </div>
+                </div>
+              )}
+            </div>
+
             {/* Persona Switcher Dropdown */}
             <div className="relative">
               <button
@@ -279,7 +368,18 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
 
           {/* Mobile menu button */}
-          <div className="flex md:hidden items-center gap-2">
+          <div className="flex md:hidden items-center gap-1">
+            <button
+              onClick={() => setNotificationsOpen(!notificationsOpen)}
+              className="relative p-2 rounded-lg text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+              title="Notifications"
+            >
+              <Bell className="h-5 w-5" />
+              {unreadNotifications.length > 0 && (
+                <span className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-rose-500 animate-pulse" />
+              )}
+            </button>
+
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
               className="p-2 rounded-lg text-zinc-600 hover:text-zinc-900 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:text-white dark:hover:bg-zinc-800"

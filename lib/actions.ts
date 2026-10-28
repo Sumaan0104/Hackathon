@@ -94,6 +94,7 @@ export async function fetchAllData(profileIdOrEmail: string = 'user-1') {
 
   // Weekly hours booked calculation on server
   const weeklyHours = campusStore.getUserWeeklyBookedHours(currentProfile.id, new Date().toISOString());
+  const notifications = campusStore.getNotifications(currentProfile.id);
 
   return {
     currentProfile,
@@ -103,6 +104,7 @@ export async function fetchAllData(profileIdOrEmail: string = 'user-1') {
     auditLogs,
     profiles,
     weeklyHours,
+    notifications,
     isDatabaseConnected: isConnected,
   };
 }
@@ -164,16 +166,16 @@ export async function updateBookingDecisionAction(
   writtenReason: string
 ) {
   const actor = await getProfileServer(profileIdOrEmail);
-  const updatedBooking = campusStore.updateBookingDecision(actor, bookingId, decision, writtenReason);
+  const result = campusStore.updateBookingDecision(actor, bookingId, decision, writtenReason);
 
   const isConnected = await isSupabaseDbConnected();
   if (isConnected) {
     await updateSupabaseBooking(bookingId, {
       status: decision,
       status_reason: writtenReason.trim(),
-      status_updated_at: updatedBooking.status_updated_at,
-      status_updated_by: updatedBooking.status_updated_by,
-      updated_at: updatedBooking.updated_at,
+      status_updated_at: result.booking.status_updated_at,
+      status_updated_by: result.booking.status_updated_by,
+      updated_at: result.booking.updated_at,
     });
     const latestAudit = campusStore.getAuditLogs()[0];
     if (latestAudit) await insertSupabaseAuditLog(latestAudit);
@@ -181,8 +183,14 @@ export async function updateBookingDecisionAction(
 
   revalidatePath('/');
   revalidatePath('/bookings');
+  revalidatePath('/owner/requests');
   revalidatePath('/audit');
-  return { success: true, booking: updatedBooking };
+  return { 
+    success: true, 
+    booking: result.booking, 
+    waitlistPosition: result.waitlistPosition,
+    notification: result.notification 
+  };
 }
 
 export async function checkInAction(
@@ -321,4 +329,138 @@ export async function resetDemoDataAction(profileIdOrEmail: string) {
   revalidatePath('/incidents');
   revalidatePath('/audit');
   return { success: true };
+}
+
+export interface OwnerPendingRequestItem {
+  booking: Booking;
+  resource: Resource;
+  requester: Profile;
+  hoursUsedThisWeek: number;
+  weeklyHoursCap: number;
+  waitlistPosition?: number;
+  totalWaitlisted?: number;
+  clash?: {
+    conflictingSlot: string;
+    userName: string;
+  };
+}
+
+export async function getOwnerPendingRequestsAction(profileIdOrEmail: string) {
+  const actor = await getProfileServer(profileIdOrEmail);
+
+  // Strict server role policy check
+  const isAllowed = ['owner', 'manager', 'admin'].includes(actor.role);
+  if (!isAllowed) {
+    return {
+      unauthorized: true,
+      role: actor.role,
+      actorName: actor.full_name,
+      requests: [] as OwnerPendingRequestItem[],
+    };
+  }
+
+  // Sync with Supabase Postgres if live
+  const isConnected = await isSupabaseDbConnected();
+  if (isConnected) {
+    try {
+      const [supaProfiles, supaResources, supaBookings] = await Promise.all([
+        fetchSupabaseProfiles(),
+        fetchSupabaseResources(),
+        fetchSupabaseBookings(),
+      ]);
+      if (supaProfiles && supaResources && supaBookings) {
+        campusStore.syncFromSupabase(supaProfiles, supaResources, supaBookings);
+      }
+    } catch {}
+  }
+
+  const allBookings = campusStore.getBookings();
+  const allResources = campusStore.getResources();
+  const allProfiles = campusStore.getAllProfiles();
+
+  // Filter pending bookings: for owner -> resources they manage; for manager/admin -> all
+  const pending = allBookings.filter((b) => {
+    if (b.status !== 'pending') return false;
+    if (['manager', 'admin'].includes(actor.role)) return true;
+    const res = allResources.find((r) => r.id === b.resource_id);
+    return res?.owner_id === actor.id || res?.owner_name === actor.full_name;
+  });
+
+  const requests: OwnerPendingRequestItem[] = pending.map((b) => {
+    const resource = allResources.find((r) => r.id === b.resource_id) || b.resource || {
+      id: b.resource_id,
+      name: 'Campus Facility',
+      description: 'Campus facility description',
+      type: 'lab' as const,
+      location: 'Campus',
+      capacity: 1,
+      eligibility_requirements: '',
+      required_certifications: [],
+      is_active: true,
+      open_time: '08:00',
+      close_time: '20:00',
+      max_hours_per_booking: 4,
+      created_at: '',
+      owner_id: '',
+    };
+
+    const requester = allProfiles.find((p) => p.id === b.user_id || p.email === b.user_email) || {
+      id: b.user_id,
+      email: b.user_email || 'student@demo.com',
+      full_name: b.user_name || 'Campus Student',
+      department: 'Academic Department',
+      role: 'user' as UserRole,
+      weekly_hours_cap: 6.0,
+      certifications: [],
+      created_at: '',
+    };
+
+    const hoursUsedThisWeek = campusStore.getUserWeeklyBookedHours(requester.id, b.start_time, b.id);
+    const weeklyHoursCap = requester.weekly_hours_cap || 6.0;
+
+    // Check waitlist for this resource
+    const waitlist = campusStore.getWaitlistByLeastRecentUse(resource.id);
+    const idx = waitlist.findIndex((w) => w.id === b.id || w.user_id === requester.id);
+    const waitlistPosition = idx >= 0 ? idx + 1 : undefined;
+
+    // Check if slot clashes with another approved booking
+    const clashBooking = campusStore.findBookingClash(resource.id, b.start_time, b.end_time, b.id);
+    const clash = clashBooking ? {
+      conflictingSlot: `${new Date(clashBooking.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - ${new Date(clashBooking.end_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
+      userName: clashBooking.user_name || 'Approved Borrower',
+    } : undefined;
+
+    return {
+      booking: b,
+      resource,
+      requester,
+      hoursUsedThisWeek,
+      weeklyHoursCap,
+      waitlistPosition,
+      totalWaitlisted: waitlist.length,
+      clash,
+    };
+  });
+
+  return {
+    unauthorized: false,
+    role: actor.role,
+    actorName: actor.full_name,
+    requests,
+  };
+}
+
+export async function markNotificationReadAction(notificationId: string) {
+  const ok = campusStore.markNotificationRead(notificationId);
+  revalidatePath('/');
+  revalidatePath('/bookings');
+  return { success: ok };
+}
+
+export async function markAllNotificationsReadAction(profileIdOrEmail: string) {
+  const actor = await getProfileServer(profileIdOrEmail);
+  const ok = campusStore.markAllNotificationsRead(actor.id);
+  revalidatePath('/');
+  revalidatePath('/bookings');
+  return { success: ok };
 }

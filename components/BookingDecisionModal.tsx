@@ -36,8 +36,8 @@ export const BookingDecisionModal: React.FC<BookingDecisionModalProps> = ({
     e.preventDefault();
     setErrorMsg(null);
 
-    if (!writtenReason || writtenReason.trim().length < 5) {
-      setErrorMsg('Mandatory Rule: Every decision requires a written reason of at least 5 characters shown to the borrower.');
+    if (!writtenReason || writtenReason.trim().length < 10) {
+      setErrorMsg('Mandatory Rule: Every decision requires a written justification of at least 10 characters shown to the borrower.');
       return;
     }
 
@@ -158,7 +158,11 @@ export const BookingDecisionModal: React.FC<BookingDecisionModalProps> = ({
                 <MessageSquareQuote className="h-3.5 w-3.5 text-indigo-500" />
                 <span>Mandatory Written Reason (Shown to Borrower)</span>
               </label>
-              <span className="text-[10px] text-amber-600 dark:text-amber-400 font-bold uppercase">Required</span>
+              <span className={`text-[10px] font-mono font-bold ${
+                writtenReason.trim().length >= 10 ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'
+              }`}>
+                {writtenReason.trim().length} / 10 chars min
+              </span>
             </div>
             <textarea
               rows={3}
@@ -174,9 +178,16 @@ export const BookingDecisionModal: React.FC<BookingDecisionModalProps> = ({
               required
               className="w-full text-xs rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 p-3 text-zinc-900 dark:text-white placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
-            <div className="mt-1 flex items-center gap-1 text-[11px] text-zinc-500 dark:text-zinc-400">
-              <ShieldCheck className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
-              <span>Campus Rule: Every action writes to audit_log and shows the reason to the student.</span>
+            <div className="mt-1 flex items-center justify-between text-[11px] text-zinc-500 dark:text-zinc-400">
+              <span className="flex items-center gap-1">
+                <ShieldCheck className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                <span>Campus Rule: Writes to audit_log and delivers in-app alert.</span>
+              </span>
+              {writtenReason.trim().length < 10 && (
+                <span className="text-[10px] text-amber-600 dark:text-amber-400 font-semibold">
+                  Needs {10 - writtenReason.trim().length} more chars
+                </span>
+              )}
             </div>
           </div>
 
@@ -191,7 +202,7 @@ export const BookingDecisionModal: React.FC<BookingDecisionModalProps> = ({
             </button>
             <button
               type="submit"
-              disabled={submitting || writtenReason.trim().length < 5}
+              disabled={submitting || writtenReason.trim().length < 10}
               className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-semibold rounded-xl shadow-xs transition-colors cursor-pointer"
             >
               {submitting ? 'Applying Decision...' : 'Confirm Decision & Notify'}

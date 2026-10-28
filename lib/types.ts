@@ -110,3 +110,16 @@ export interface AuditLogEntry {
   details: Record<string, any>;
   created_at: string;
 }
+
+export interface InAppNotification {
+  id: string;
+  user_id: string;
+  booking_id: string;
+  resource_name: string;
+  type: 'booking_approved' | 'booking_rejected' | 'booking_waitlisted';
+  title: string;
+  message: string;
+  reason: string;
+  read: boolean;
+  created_at: string;
+}
