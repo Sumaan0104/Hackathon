@@ -99,6 +99,11 @@ export default function OwnerRequestsPage() {
         reason
       );
 
+      if (!res.success) {
+        setErrorMsg(res.error || 'Server rejected decision authorization.');
+        return;
+      }
+
       const feedbackMsg = decision === 'approved'
         ? `Approved! Verified schedule and weekly quota. Stated reason logged to audit trail.`
         : decision === 'rejected'

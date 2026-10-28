@@ -165,32 +165,42 @@ export async function updateBookingDecisionAction(
   decision: 'approved' | 'rejected' | 'waitlisted',
   writtenReason: string
 ) {
-  const actor = await getProfileServer(profileIdOrEmail);
-  const result = campusStore.updateBookingDecision(actor, bookingId, decision, writtenReason);
+  try {
+    const actor = await getProfileServer(profileIdOrEmail);
+    const result = campusStore.updateBookingDecision(actor, bookingId, decision, writtenReason);
 
-  const isConnected = await isSupabaseDbConnected();
-  if (isConnected) {
-    await updateSupabaseBooking(bookingId, {
-      status: decision,
-      status_reason: writtenReason.trim(),
-      status_updated_at: result.booking.status_updated_at,
-      status_updated_by: result.booking.status_updated_by,
-      updated_at: result.booking.updated_at,
-    });
-    const latestAudit = campusStore.getAuditLogs()[0];
-    if (latestAudit) await insertSupabaseAuditLog(latestAudit);
+    const isConnected = await isSupabaseDbConnected();
+    if (isConnected) {
+      await updateSupabaseBooking(bookingId, {
+        status: decision,
+        status_reason: writtenReason.trim(),
+        status_updated_at: result.booking.status_updated_at,
+        status_updated_by: result.booking.status_updated_by,
+        updated_at: result.booking.updated_at,
+      });
+      const latestAudit = campusStore.getAuditLogs()[0];
+      if (latestAudit) await insertSupabaseAuditLog(latestAudit);
+    }
+
+    revalidatePath('/');
+    revalidatePath('/bookings');
+    revalidatePath('/owner/requests');
+    revalidatePath('/audit');
+    return { 
+      success: true, 
+      booking: result.booking, 
+      waitlistPosition: result.waitlistPosition,
+      notification: result.notification 
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: err.message || 'Server rejected decision authorization.',
+      booking: undefined,
+      waitlistPosition: undefined,
+      notification: undefined,
+    };
   }
-
-  revalidatePath('/');
-  revalidatePath('/bookings');
-  revalidatePath('/owner/requests');
-  revalidatePath('/audit');
-  return { 
-    success: true, 
-    booking: result.booking, 
-    waitlistPosition: result.waitlistPosition,
-    notification: result.notification 
-  };
 }
 
 export async function checkInAction(
@@ -199,28 +209,36 @@ export async function checkInAction(
   conditionNotes: string,
   checklist?: InspectionChecklist
 ) {
-  const actor = await getProfileServer(profileIdOrEmail);
-  const updatedBooking = campusStore.checkIn(actor, bookingId, conditionNotes, checklist);
+  try {
+    const actor = await getProfileServer(profileIdOrEmail);
+    const updatedBooking = campusStore.checkIn(actor, bookingId, conditionNotes, checklist);
 
-  const isConnected = await isSupabaseDbConnected();
-  if (isConnected) {
-    await updateSupabaseBooking(bookingId, {
-      status: 'checked_in',
-      checkin_condition_notes: updatedBooking.checkin_condition_notes,
-      checkin_checklist: updatedBooking.checkin_checklist,
-      checked_in_at: updatedBooking.checked_in_at,
-      updated_at: updatedBooking.updated_at,
-    });
-    const latestAudit = campusStore.getAuditLogs()[0];
-    if (latestAudit) await insertSupabaseAuditLog(latestAudit);
+    const isConnected = await isSupabaseDbConnected();
+    if (isConnected) {
+      await updateSupabaseBooking(bookingId, {
+        status: 'checked_in',
+        checkin_condition_notes: updatedBooking.checkin_condition_notes,
+        checkin_checklist: updatedBooking.checkin_checklist,
+        checked_in_at: updatedBooking.checked_in_at,
+        updated_at: updatedBooking.updated_at,
+      });
+      const latestAudit = campusStore.getAuditLogs()[0];
+      if (latestAudit) await insertSupabaseAuditLog(latestAudit);
+    }
+
+    revalidatePath('/');
+    revalidatePath('/bookings');
+    revalidatePath(`/bookings/${bookingId}`);
+    revalidatePath('/owner/requests');
+    revalidatePath('/audit');
+    return { success: true, booking: updatedBooking };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: err.message || 'Check-in failed.',
+      booking: undefined,
+    };
   }
-
-  revalidatePath('/');
-  revalidatePath('/bookings');
-  revalidatePath(`/bookings/${bookingId}`);
-  revalidatePath('/owner/requests');
-  revalidatePath('/audit');
-  return { success: true, booking: updatedBooking };
 }
 
 export async function returnAction(
@@ -230,39 +248,49 @@ export async function returnAction(
   conditionRating: ConditionRating,
   checklist?: InspectionChecklist
 ) {
-  const actor = await getProfileServer(profileIdOrEmail);
-  const result = campusStore.returnResource(actor, bookingId, conditionNotes, conditionRating, checklist);
+  try {
+    const actor = await getProfileServer(profileIdOrEmail);
+    const result = campusStore.returnResource(actor, bookingId, conditionNotes, conditionRating, checklist);
 
-  const isConnected = await isSupabaseDbConnected();
-  if (isConnected) {
-    await updateSupabaseBooking(bookingId, {
-      status: 'completed',
-      return_condition_notes: result.booking.return_condition_notes,
-      return_checklist: result.booking.return_checklist,
-      returned_at: result.booking.returned_at,
-      updated_at: result.booking.updated_at,
-    });
-    // Insert RETURNED and LATE_RETURN (if late)
-    const logs = campusStore.getAuditLogs();
-    if (result.isLate && logs.length >= 2) {
-      await insertSupabaseAuditLog(logs[1]);
-      await insertSupabaseAuditLog(logs[0]);
-    } else if (logs[0]) {
-      await insertSupabaseAuditLog(logs[0]);
+    const isConnected = await isSupabaseDbConnected();
+    if (isConnected) {
+      await updateSupabaseBooking(bookingId, {
+        status: 'completed',
+        return_condition_notes: result.booking.return_condition_notes,
+        return_checklist: result.booking.return_checklist,
+        returned_at: result.booking.returned_at,
+        updated_at: result.booking.updated_at,
+      });
+      // Insert RETURNED and LATE_RETURN (if late)
+      const logs = campusStore.getAuditLogs();
+      if (result.isLate && logs.length >= 2) {
+        await insertSupabaseAuditLog(logs[1]);
+        await insertSupabaseAuditLog(logs[0]);
+      } else if (logs[0]) {
+        await insertSupabaseAuditLog(logs[0]);
+      }
     }
-  }
 
-  revalidatePath('/');
-  revalidatePath('/bookings');
-  revalidatePath(`/bookings/${bookingId}`);
-  revalidatePath('/owner/requests');
-  revalidatePath('/audit');
-  return { 
-    success: true, 
-    booking: result.booking, 
-    isLate: result.isLate, 
-    lateMinutes: result.lateMinutes 
-  };
+    revalidatePath('/');
+    revalidatePath('/bookings');
+    revalidatePath(`/bookings/${bookingId}`);
+    revalidatePath('/owner/requests');
+    revalidatePath('/audit');
+    return { 
+      success: true, 
+      booking: result.booking, 
+      isLate: result.isLate, 
+      lateMinutes: result.lateMinutes 
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: err.message || 'Return processing failed.',
+      booking: undefined,
+      isLate: false,
+      lateMinutes: 0,
+    };
+  }
 }
 
 export async function reportIncidentAction(
@@ -272,22 +300,30 @@ export async function reportIncidentAction(
   severity: IncidentSeverity,
   description: string
 ) {
-  const actor = await getProfileServer(profileIdOrEmail);
-  const report = campusStore.reportIncident(actor, bookingId, type, severity, description);
+  try {
+    const actor = await getProfileServer(profileIdOrEmail);
+    const report = campusStore.reportIncident(actor, bookingId, type, severity, description);
 
-  const isConnected = await isSupabaseDbConnected();
-  if (isConnected) {
-    await insertSupabaseIncident(report);
-    const latestAudit = campusStore.getAuditLogs()[0];
-    if (latestAudit) await insertSupabaseAuditLog(latestAudit);
+    const isConnected = await isSupabaseDbConnected();
+    if (isConnected) {
+      await insertSupabaseIncident(report);
+      const latestAudit = campusStore.getAuditLogs()[0];
+      if (latestAudit) await insertSupabaseAuditLog(latestAudit);
+    }
+
+    revalidatePath('/');
+    revalidatePath('/bookings');
+    revalidatePath(`/bookings/${bookingId}`);
+    revalidatePath('/incidents');
+    revalidatePath('/audit');
+    return { success: true, incident: report };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: err.message || 'Failed to submit incident report.',
+      incident: undefined,
+    };
   }
-
-  revalidatePath('/');
-  revalidatePath('/bookings');
-  revalidatePath(`/bookings/${bookingId}`);
-  revalidatePath('/incidents');
-  revalidatePath('/audit');
-  return { success: true, incident: report };
 }
 
 export async function resolveIncidentAction(
@@ -295,21 +331,29 @@ export async function resolveIncidentAction(
   incidentId: string,
   resolutionNotes: string
 ) {
-  const actor = await getProfileServer(profileIdOrEmail);
-  const report = campusStore.resolveIncident(actor, incidentId, resolutionNotes);
+  try {
+    const actor = await getProfileServer(profileIdOrEmail);
+    const report = campusStore.resolveIncident(actor, incidentId, resolutionNotes);
 
-  const isConnected = await isSupabaseDbConnected();
-  if (isConnected) {
-    const latestAudit = campusStore.getAuditLogs()[0];
-    if (latestAudit) await insertSupabaseAuditLog(latestAudit);
+    const isConnected = await isSupabaseDbConnected();
+    if (isConnected) {
+      const latestAudit = campusStore.getAuditLogs()[0];
+      if (latestAudit) await insertSupabaseAuditLog(latestAudit);
+    }
+
+    revalidatePath('/');
+    revalidatePath('/bookings');
+    revalidatePath(`/bookings/${report.booking_id}`);
+    revalidatePath('/incidents');
+    revalidatePath('/audit');
+    return { success: true, incident: report };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: err.message || 'Failed to resolve incident.',
+      incident: undefined,
+    };
   }
-
-  revalidatePath('/');
-  revalidatePath('/bookings');
-  revalidatePath(`/bookings/${report.booking_id}`);
-  revalidatePath('/incidents');
-  revalidatePath('/audit');
-  return { success: true, incident: report };
 }
 
 export async function createResourceAction(
@@ -331,26 +375,34 @@ export async function createResourceAction(
     safety_tier?: number;
   }
 ) {
-  const actor = await getProfileServer(profileIdOrEmail);
-  const newResource = campusStore.addResource(actor, {
-    ...resourceData,
-    open_time: resourceData.open_time || '08:00',
-    close_time: resourceData.close_time || '20:00',
-    max_hours_per_booking: resourceData.max_hours_per_booking || 4.0,
-    required_certifications: resourceData.required_certifications || [],
-  });
+  try {
+    const actor = await getProfileServer(profileIdOrEmail);
+    const newResource = campusStore.addResource(actor, {
+      ...resourceData,
+      open_time: resourceData.open_time || '08:00',
+      close_time: resourceData.close_time || '20:00',
+      max_hours_per_booking: resourceData.max_hours_per_booking || 4.0,
+      required_certifications: resourceData.required_certifications || [],
+    });
 
-  const isConnected = await isSupabaseDbConnected();
-  if (isConnected) {
-    await insertSupabaseResource(newResource);
-    const latestAudit = campusStore.getAuditLogs()[0];
-    if (latestAudit) await insertSupabaseAuditLog(latestAudit);
+    const isConnected = await isSupabaseDbConnected();
+    if (isConnected) {
+      await insertSupabaseResource(newResource);
+      const latestAudit = campusStore.getAuditLogs()[0];
+      if (latestAudit) await insertSupabaseAuditLog(latestAudit);
+    }
+
+    revalidatePath('/');
+    revalidatePath('/resources');
+    revalidatePath('/audit');
+    return { success: true, resource: newResource };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: err.message || 'Failed to create resource listing.',
+      resource: undefined,
+    };
   }
-
-  revalidatePath('/');
-  revalidatePath('/resources');
-  revalidatePath('/audit');
-  return { success: true, resource: newResource };
 }
 
 export async function getWaitlistQueueAction(resourceId: string) {
@@ -358,16 +410,23 @@ export async function getWaitlistQueueAction(resourceId: string) {
 }
 
 export async function resetDemoDataAction(profileIdOrEmail: string) {
-  const actor = await getProfileServer(profileIdOrEmail);
-  if (!['admin', 'manager'].includes(actor.role)) {
-    throw new Error('Unauthorized: Only administrators or facility managers can reset sample demonstration fixtures.');
+  try {
+    const actor = await getProfileServer(profileIdOrEmail);
+    if (!['admin', 'manager'].includes(actor.role)) {
+      return { success: false, error: 'Unauthorized: Only administrators or facility managers can reset sample demonstration fixtures.' };
+    }
+    campusStore.seed();
+    revalidatePath('/');
+    revalidatePath('/bookings');
+    revalidatePath('/incidents');
+    revalidatePath('/audit');
+    return { success: true };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: err.message || 'Failed to reset demonstration fixtures.',
+    };
   }
-  campusStore.seed();
-  revalidatePath('/');
-  revalidatePath('/bookings');
-  revalidatePath('/incidents');
-  revalidatePath('/audit');
-  return { success: true };
 }
 
 export interface OwnerPendingRequestItem {

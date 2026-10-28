@@ -212,14 +212,20 @@ export const CampusShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
     decision: 'approved' | 'rejected' | 'waitlisted',
     writtenReason: string
   ) => {
-    await updateBookingDecisionAction(currentProfile.email || currentProfile.id, bookingId, decision, writtenReason);
+    const res = await updateBookingDecisionAction(currentProfile.email || currentProfile.id, bookingId, decision, writtenReason);
+    if (!res.success) {
+      throw new Error(res.error || 'Failed to update booking decision.');
+    }
     await loadData(currentProfile.email || currentProfile.id);
     showToast(`Decision recorded: ${decision.toUpperCase()} with mandatory written justification.`, 'success');
   };
 
   // Handler for check-in with checklist
   const handleCheckInSubmit = async (bookingId: string, notes: string, checklist: InspectionChecklist) => {
-    await checkInAction(currentProfile.email || currentProfile.id, bookingId, notes, checklist);
+    const res = await checkInAction(currentProfile.email || currentProfile.id, bookingId, notes, checklist);
+    if (!res.success) {
+      throw new Error(res.error || 'Arrival check-in failed.');
+    }
     await loadData(currentProfile.email || currentProfile.id);
     showToast('Arrival check-in confirmed & physical inspection logged to audit trail.', 'success');
   };
@@ -232,6 +238,9 @@ export const CampusShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
     checklist: InspectionChecklist
   ) => {
     const res = await returnAction(currentProfile.email || currentProfile.id, bookingId, notes, rating, checklist);
+    if (!res.success) {
+      throw new Error(res.error || 'Return submission failed.');
+    }
     await loadData(currentProfile.email || currentProfile.id);
     if (res.isLate) {
       showToast(`Departure verified: Resource returned late (+${res.lateMinutes}m delay recorded). No automated penalties applied.`, 'info');
@@ -247,28 +256,41 @@ export const CampusShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
     severity: IncidentSeverity, 
     description: string
   ) => {
-    await reportIncidentAction(currentProfile.email || currentProfile.id, bookingId, type, severity, description);
+    const res = await reportIncidentAction(currentProfile.email || currentProfile.id, bookingId, type, severity, description);
+    if (!res.success) {
+      throw new Error(res.error || 'Failed to report incident.');
+    }
     await loadData(currentProfile.email || currentProfile.id);
     showToast(`Incident report recorded. No automated penalty applied under campus policy.`, 'info');
   };
 
   // Handler for resolving incident
   const handleResolveIncidentSubmit = async (incidentId: string, resolutionNotes: string) => {
-    await resolveIncidentAction(currentProfile.email || currentProfile.id, incidentId, resolutionNotes);
+    const res = await resolveIncidentAction(currentProfile.email || currentProfile.id, incidentId, resolutionNotes);
+    if (!res.success) {
+      throw new Error(res.error || 'Failed to resolve incident.');
+    }
     await loadData(currentProfile.email || currentProfile.id);
     showToast('Incident marked resolved by facility custodian. Audit trail updated.', 'success');
   };
 
   // Handler for resource creation
   const handleCreateResourceSubmit = async (data: any) => {
-    await createResourceAction(currentProfile.email || currentProfile.id, data);
+    const res = await createResourceAction(currentProfile.email || currentProfile.id, data);
+    if (!res.success) {
+      throw new Error(res.error || 'Failed to create resource.');
+    }
     await loadData(currentProfile.email || currentProfile.id);
     showToast(`Resource "${data.name}" listed successfully.`, 'success');
   };
 
   // Reset demo fixtures
   const handleResetDemoData = async () => {
-    await resetDemoDataAction(currentProfile.email || currentProfile.id);
+    const res = await resetDemoDataAction(currentProfile.email || currentProfile.id);
+    if (!res.success) {
+      showToast(res.error || 'Failed to reset demonstration fixtures.', 'error');
+      return;
+    }
     await loadData(currentProfile.email || currentProfile.id);
     showToast('Demonstration data & fixtures reset to factory baseline.', 'info');
   };
