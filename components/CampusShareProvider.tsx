@@ -15,6 +15,7 @@ import {
 import { 
   fetchAllData, 
   requestBookingAction, 
+  joinWaitlistAction,
   updateBookingDecisionAction, 
   checkInAction, 
   returnAction, 
@@ -124,7 +125,6 @@ export const CampusShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
   };
 
   useEffect(() => {
-    // Check if Supabase has an active session on mount
     const checkSupabaseSession = async () => {
       try {
         const supabase = createClient();
@@ -142,7 +142,6 @@ export const CampusShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
   }, []);
 
   const switchProfile = async (profileIdOrEmail: string) => {
-    // Attempt real Supabase Auth session login in the background for demo accounts
     try {
       const email = profileIdOrEmail.includes('@') ? profileIdOrEmail : profiles.find(p => p.id === profileIdOrEmail)?.email;
       if (email) {
@@ -153,7 +152,7 @@ export const CampusShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
         });
       }
     } catch (e) {
-      // In-memory or fallback profile switch
+      // In-memory fallback
     }
 
     await loadData(profileIdOrEmail);
@@ -167,14 +166,29 @@ export const CampusShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
     startTime: string, 
     endTime: string, 
     purpose: string
-  ) => {
+  ): Promise<{ clash?: boolean; conflictingSlot?: any }> => {
     const res = await requestBookingAction(currentProfile.email || currentProfile.id, resourceId, startTime, endTime, purpose);
     await loadData(currentProfile.email || currentProfile.id);
-    if (res.waitlisted) {
-      showToast(`Schedule clash detected: Placed on Fair-Access Waitlist (#1 priority queue)!`, 'info');
+    
+    if (res.clash) {
+      showToast('Schedule clash: Slot is occupied. Choose "Join Waitlist" below.', 'error');
+      return { clash: true, conflictingSlot: res.conflictingSlot };
     } else {
-      showToast('Booking request submitted! Awaiting facility owner review.', 'success');
+      showToast('Booking submitted with status "PENDING"! Sent to facility owner.', 'success');
+      return { clash: false };
     }
+  };
+
+  // Handler for joining the waitlist
+  const handleJoinWaitlist = async (
+    resourceId: string, 
+    startTime: string, 
+    endTime: string, 
+    purpose: string
+  ) => {
+    await joinWaitlistAction(currentProfile.email || currentProfile.id, resourceId, startTime, endTime, purpose);
+    await loadData(currentProfile.email || currentProfile.id);
+    showToast('Joined Waitlist (Ordered by least recent use priority)!', 'info');
   };
 
   // Handler for owner decision
@@ -348,6 +362,7 @@ export const CampusShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
           isOpen={isBookingOpen}
           onClose={() => setIsBookingOpen(false)}
           onSubmit={handleBookingSubmit}
+          onJoinWaitlist={handleJoinWaitlist}
         />
 
         <BookingDecisionModal

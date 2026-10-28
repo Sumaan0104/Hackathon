@@ -40,6 +40,9 @@ export interface Resource {
   eligibility_requirements: string;
   required_certifications: string[]; // specific certs required to book
   is_active: boolean;
+  open_time: string; // e.g. '08:00'
+  close_time: string; // e.g. '20:00'
+  max_hours_per_booking: number; // e.g. 4.0
   image_url?: string;
   specs?: string[];
   safety_tier?: number;

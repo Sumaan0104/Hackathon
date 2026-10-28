@@ -20,8 +20,6 @@ import {
   MOCK_AUDIT_LOGS 
 } from './mock-data';
 
-// Server-side shared file persistence path:
-// Ensures multi-device testing (owner on Device 1, user on Device 2) shares the exact same database state!
 const DB_FILE_DIR = path.join(process.cwd(), '.data');
 const DB_FILE_PATH = path.join(DB_FILE_DIR, 'shared_db.json');
 
@@ -31,6 +29,18 @@ interface PersistedState {
   bookings: Booking[];
   incidents: IncidentReport[];
   auditLogs: AuditLogEntry[];
+}
+
+export interface BookingValidationResult {
+  success: boolean;
+  clash: boolean;
+  booking?: Booking;
+  conflictingSlot?: {
+    start: string;
+    end: string;
+    userName: string;
+  };
+  warning?: string;
 }
 
 class CampusShareStore {
@@ -72,8 +82,20 @@ class CampusShareStore {
         // Ensure user-2 exists in loaded profiles
         if (!this.profiles.has('user-2')) {
           this.profiles.set('user-2', MOCK_PROFILES['user-2']);
-          this.saveToDisk();
         }
+
+        // Ensure resources have open_time / close_time / max_hours_per_booking
+        data.resources.forEach((r) => {
+          const mock = MOCK_RESOURCES.find(m => m.id === r.id);
+          if (mock) {
+            r.open_time = r.open_time || mock.open_time;
+            r.close_time = r.close_time || mock.close_time;
+            r.max_hours_per_booking = r.max_hours_per_booking || mock.max_hours_per_booking;
+            r.required_certifications = r.required_certifications || mock.required_certifications;
+          }
+        });
+
+        this.saveToDisk();
         return true;
       }
     } catch (e) {
@@ -169,6 +191,10 @@ class CampusShareStore {
       owner_name: actor.full_name,
       owner_department: actor.department,
       utilization_rate: 0,
+      open_time: resourceData.open_time || '08:00',
+      close_time: resourceData.close_time || '20:00',
+      max_hours_per_booking: resourceData.max_hours_per_booking || 4.0,
+      required_certifications: resourceData.required_certifications || [],
       created_at: new Date().toISOString(),
     };
 
@@ -237,43 +263,23 @@ class CampusShareStore {
   }
 
   /**
-   * Request a booking.
-   * STRICT SERVER-SIDE ELIGIBILITY CHECK:
-   * Checks actor.certifications against resource.required_certifications.
-   * If missing, BLOCKS the booking and states what is missing.
+   * Internal common validator for a booking slot.
+   * Validates:
+   * 1. Date/time bounds & logic
+   * 2. Operating hours (open_time, close_time)
+   * 3. Max hours per booking
+   * 4. Eligibility certifications
+   * 5. Fair use weekly cap (6h)
    */
-  requestBooking(
-    actor: Profile, 
-    resourceId: string, 
-    startTime: string, 
-    endTime: string, 
+  private validateBookingRequest(
+    actor: Profile,
+    resource: Resource,
+    startTime: string,
+    endTime: string,
     purpose: string
-  ): { booking: Booking; waitlisted: boolean; warning?: string; clashingWith?: string } {
-    this.loadFromDisk();
-    const resource = this.resources.get(resourceId);
-    if (!resource) throw new Error('Resource not found.');
-    if (!resource.is_active) throw new Error('Resource is currently inactive for maintenance.');
-
-    // 1. STRICT ELIGIBILITY CHECK
-    if (resource.required_certifications && resource.required_certifications.length > 0) {
-      const userCerts = actor.certifications || [];
-      const missingCerts = resource.required_certifications.filter(
-        (cert) => !userCerts.includes(cert)
-      );
-
-      if (missingCerts.length > 0) {
-        const errorMsg = `Eligibility Blocked: You do not have the required certification(s): "${missingCerts.join(', ')}". Current certifications on file: ${userCerts.length > 0 ? userCerts.join(', ') : 'None'}. Please complete the required training before requesting this resource.`;
-        
-        // Log the failed eligibility attempt to audit log
-        this.logAction(actor, 'BOOKING_ELIGIBILITY_BLOCKED', 'resource', resourceId, {
-          resource_name: resource.name,
-          missing_certifications: missingCerts,
-          user_certifications: userCerts,
-        });
-        this.saveToDisk();
-
-        throw new Error(errorMsg);
-      }
+  ): { start: Date; end: Date; durationHours: number; currentWeekHours: number } {
+    if (!resource.is_active) {
+      throw new Error('Resource is currently inactive for maintenance.');
     }
 
     const start = new Date(startTime);
@@ -282,7 +288,7 @@ class CampusShareStore {
       throw new Error('Invalid date-time format provided.');
     }
     if (end <= start) {
-      throw new Error('End time must be after start time.');
+      throw new Error('End time must be later than start time.');
     }
 
     const durationHours = (end.getTime() - start.getTime()) / (1000 * 60 * 60);
@@ -290,25 +296,130 @@ class CampusShareStore {
       throw new Error('Booking duration must be greater than zero.');
     }
 
-    // Weekly cap enforcement (default 6.0h)
+    // 1. Operating Hours Validation
+    // Extract local HH:mm from start and end
+    const startHourMin = `${String(start.getUTCHours()).padStart(2, '0')}:${String(start.getUTCMinutes()).padStart(2, '0')}`;
+    const endHourMin = `${String(end.getUTCHours()).padStart(2, '0')}:${String(end.getUTCMinutes()).padStart(2, '0')}`;
+    
+    // Compare against resource.open_time and resource.close_time
+    const openTime = resource.open_time || '08:00';
+    const closeTime = resource.close_time || '20:00';
+    
+    // Extract time of day from ISO strings or local representation
+    const startTimePart = startTime.includes('T') ? startTime.split('T')[1].substring(0, 5) : startHourMin;
+    const endTimePart = endTime.includes('T') ? endTime.split('T')[1].substring(0, 5) : endHourMin;
+
+    if (startTimePart < openTime || endTimePart > closeTime) {
+      const err = `Operating Hours Violation: Booking must fall within facility operating hours (${openTime} to ${closeTime}). Requested: ${startTimePart} to ${endTimePart}.`;
+      this.logAction(actor, 'BOOKING_REJECTED', 'resource', resource.id, {
+        reason: err,
+        requested_slot: { start: startTime, end: endTime },
+        operating_hours: { open: openTime, close: closeTime }
+      });
+      this.saveToDisk();
+      throw new Error(err);
+    }
+
+    // 2. Max Hours Per Booking
+    const maxHours = resource.max_hours_per_booking || 4.0;
+    if (durationHours > maxHours) {
+      const err = `Duration Limit Violation: Exceeds max allowed booking duration of ${maxHours.toFixed(1)} hours (requested: ${durationHours.toFixed(1)}h).`;
+      this.logAction(actor, 'BOOKING_REJECTED', 'resource', resource.id, {
+        reason: err,
+        requested_duration: durationHours,
+        max_allowed: maxHours
+      });
+      this.saveToDisk();
+      throw new Error(err);
+    }
+
+    // 3. Strict Eligibility Certificate Gate
+    if (resource.required_certifications && resource.required_certifications.length > 0) {
+      const userCerts = actor.certifications || [];
+      const missingCerts = resource.required_certifications.filter(c => !userCerts.includes(c));
+
+      if (missingCerts.length > 0) {
+        const missingStr = missingCerts.join(', ');
+        const err = `Eligibility Blocked: You're missing: ${missingStr}.`;
+        this.logAction(actor, 'BOOKING_REJECTED', 'resource', resource.id, {
+          reason: err,
+          missing_certifications: missingCerts,
+          user_certifications: userCerts,
+        });
+        this.saveToDisk();
+        throw new Error(err);
+      }
+    }
+
+    // 4. Fair Use Weekly Cap (6.0h per user)
     const currentWeekHours = this.getUserWeeklyBookedHours(actor.id, startTime);
     const userCap = actor.weekly_hours_cap ?? 6.0;
 
     if (currentWeekHours + durationHours > userCap) {
-      throw new Error(
-        `Weekly quota exceeded: You have ${currentWeekHours.toFixed(1)}h booked this week. Requesting ${durationHours.toFixed(1)}h would reach ${(currentWeekHours + durationHours).toFixed(1)}h, exceeding your weekly quota of ${userCap}h.`
-      );
+      const hoursLeft = Math.max(0, userCap - currentWeekHours);
+      const err = `Rule: Weekly cap of ${userCap.toFixed(1)} hours per user. You currently have ${currentWeekHours.toFixed(1)} hours booked this week (${hoursLeft.toFixed(1)} hours left). Requesting ${durationHours.toFixed(1)} hours exceeds your cap.`;
+      this.logAction(actor, 'BOOKING_REJECTED', 'booking', resource.id, {
+        reason: err,
+        currentWeekHours,
+        durationHours,
+        hoursLeft,
+        userCap
+      });
+      this.saveToDisk();
+      throw new Error(err);
     }
 
-    // Clash detection
+    return { start, end, durationHours, currentWeekHours };
+  }
+
+  /**
+   * Request a booking.
+   * Enforces Operating hours, Max hours, Eligibility, Weekly cap, and Clash Detection.
+   * If clash occurs: Rejects overlap, logs BOOKING_CLASH_DETECTED, and returns conflicting slot with waitlist offer.
+   * If valid: Status is strictly 'pending', logs BOOKING_REQUESTED.
+   */
+  requestBooking(
+    actor: Profile, 
+    resourceId: string, 
+    startTime: string, 
+    endTime: string, 
+    purpose: string
+  ): BookingValidationResult {
+    this.loadFromDisk();
+    const resource = this.resources.get(resourceId);
+    if (!resource) throw new Error('Resource not found.');
+
+    // Enforce all validations (hours, max duration, eligibility, weekly cap)
+    const { durationHours, currentWeekHours } = this.validateBookingRequest(actor, resource, startTime, endTime, purpose);
+
+    // 5. Clash Detection against approved or checked_in bookings
     const clashingBooking = this.findBookingClash(resourceId, startTime, endTime);
-    const clash = !!clashingBooking;
+    if (clashingBooking) {
+      const clashStart = new Date(clashingBooking.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const clashEnd = new Date(clashingBooking.end_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-    const initialStatus: BookingStatus = clash ? 'waitlisted' : 'pending';
-    const statusReason = clash 
-      ? `Auto-routed to Fair-Access Waitlist: Time slot conflicts with scheduled session (${new Date(clashingBooking.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - ${new Date(clashingBooking.end_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}). Ordered by least recent use.`
-      : undefined;
+      // Log clash to audit_log
+      this.logAction(actor, 'BOOKING_CLASH_DETECTED', 'resource', resourceId, {
+        requested_slot: { start: startTime, end: endTime },
+        conflicting_booking_id: clashingBooking.id,
+        conflicting_user: clashingBooking.user_name,
+        conflicting_slot: `${clashStart} - ${clashEnd}`,
+      });
+      this.saveToDisk();
 
+      return {
+        success: false,
+        clash: true,
+        conflictingSlot: {
+          start: clashingBooking.start_time,
+          end: clashingBooking.end_time,
+          userName: clashingBooking.user_name || 'Another Researcher',
+        },
+        warning: `Conflict: Slot overlaps with an approved booking (${clashStart} – ${clashEnd} by ${clashingBooking.user_name}). You may join the waitlist.`,
+      };
+    }
+
+    // 6. Valid non-clashing booking: Create with status 'pending'
     const newBooking: Booking = {
       id: `bk-${Date.now()}`,
       resource_id: resourceId,
@@ -320,32 +431,80 @@ class CampusShareStore {
       end_time: endTime,
       duration_hours: Number(durationHours.toFixed(1)),
       purpose,
-      status: initialStatus,
-      status_reason: statusReason,
-      clash_detected: clash,
+      status: 'pending',
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
 
     this.bookings.set(newBooking.id, newBooking);
 
+    // Log request to audit_log
     this.logAction(actor, 'BOOKING_REQUESTED', 'booking', newBooking.id, {
       resource_id: resourceId,
       resource_name: resource.name,
       duration_hours: durationHours,
       weekly_hours_prior: currentWeekHours,
-      status: initialStatus,
-      clash_detected: clash,
+      status: 'pending',
     });
 
     this.saveToDisk();
 
-    return { 
-      booking: newBooking, 
-      waitlisted: clash, 
-      warning: clash ? `Slot conflicts with an approved booking. You've been placed on the Fair-Access Waitlist.` : undefined,
-      clashingWith: clashingBooking ? clashingBooking.user_name : undefined
+    return {
+      success: true,
+      clash: false,
+      booking: newBooking,
     };
+  }
+
+  /**
+   * Join Waitlist:
+   * Called when a slot is taken and the user opts to join the waitlist.
+   * Enforces all checks, creates booking with status 'waitlisted', logs WAITLIST_JOINED.
+   */
+  joinWaitlist(
+    actor: Profile,
+    resourceId: string,
+    startTime: string,
+    endTime: string,
+    purpose: string
+  ): Booking {
+    this.loadFromDisk();
+    const resource = this.resources.get(resourceId);
+    if (!resource) throw new Error('Resource not found.');
+
+    const { durationHours, currentWeekHours } = this.validateBookingRequest(actor, resource, startTime, endTime, purpose);
+
+    const waitlistedBooking: Booking = {
+      id: `bk-${Date.now()}`,
+      resource_id: resourceId,
+      resource,
+      user_id: actor.id,
+      user_name: actor.full_name,
+      user_email: actor.email,
+      start_time: startTime,
+      end_time: endTime,
+      duration_hours: Number(durationHours.toFixed(1)),
+      purpose,
+      status: 'waitlisted',
+      status_reason: 'User accepted placement on fair-access waitlist due to schedule conflict. Ordered by least recent use.',
+      clash_detected: true,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    this.bookings.set(waitlistedBooking.id, waitlistedBooking);
+
+    // Log waitlist join to audit_log
+    this.logAction(actor, 'WAITLIST_JOINED', 'booking', waitlistedBooking.id, {
+      resource_id: resourceId,
+      resource_name: resource.name,
+      duration_hours: durationHours,
+      weekly_hours_prior: currentWeekHours,
+      status: 'waitlisted',
+    });
+
+    this.saveToDisk();
+    return waitlistedBooking;
   }
 
   updateBookingDecision(

@@ -6,14 +6,13 @@ import { revalidatePath } from 'next/cache';
 import { createClient as createServerSupabase } from './supabase/server';
 
 export async function getProfileServer(profileIdOrEmail: string): Promise<Profile> {
-  // First, check if there's an active Supabase Auth user session from cookies
+  // Check if there's an active Supabase Auth user session from cookies
   try {
     const supabase = await createServerSupabase();
     const { data: { user } } = await supabase.auth.getUser();
     if (user && user.email) {
       let p = campusStore.getProfileByEmail(user.email);
       if (!p) {
-        // Register or sync user profile
         p = campusStore.upsertProfile({
           id: user.id,
           email: user.email,
@@ -30,13 +29,12 @@ export async function getProfileServer(profileIdOrEmail: string): Promise<Profil
       }
     }
   } catch (e) {
-    // If Supabase session is unavailable or cookies not set, fall back to store lookup
+    // Fall back to store lookup
   }
 
   // Lookup in store by ID or by Email
   let profile = campusStore.getProfile(profileIdOrEmail) || campusStore.getProfileByEmail(profileIdOrEmail);
   if (!profile) {
-    // Check all profiles
     const all = campusStore.getAllProfiles();
     profile = all.find(p => p.id === profileIdOrEmail || p.email.toLowerCase() === profileIdOrEmail.toLowerCase());
   }
@@ -77,16 +75,27 @@ export async function requestBookingAction(
   purpose: string
 ) {
   const actor = await getProfileServer(profileIdOrEmail);
+  // Authoritative server-side validation & creation
   const result = campusStore.requestBooking(actor, resourceId, startTime, endTime, purpose);
   revalidatePath('/');
   revalidatePath('/bookings');
-  return { 
-    success: true, 
-    booking: result.booking, 
-    waitlisted: result.waitlisted, 
-    warning: result.warning,
-    clashingWith: result.clashingWith
-  };
+  revalidatePath('/audit');
+  return result;
+}
+
+export async function joinWaitlistAction(
+  profileIdOrEmail: string,
+  resourceId: string,
+  startTime: string,
+  endTime: string,
+  purpose: string
+) {
+  const actor = await getProfileServer(profileIdOrEmail);
+  const booking = campusStore.joinWaitlist(actor, resourceId, startTime, endTime, purpose);
+  revalidatePath('/');
+  revalidatePath('/bookings');
+  revalidatePath('/audit');
+  return { success: true, booking };
 }
 
 export async function updateBookingDecisionAction(
@@ -158,6 +167,9 @@ export async function createResourceAction(
     eligibility_requirements: string;
     required_certifications?: string[];
     is_active: boolean;
+    open_time?: string;
+    close_time?: string;
+    max_hours_per_booking?: number;
     specs?: string[];
     available_hours?: string;
     safety_tier?: number;
@@ -166,6 +178,9 @@ export async function createResourceAction(
   const actor = await getProfileServer(profileIdOrEmail);
   const newResource = campusStore.addResource(actor, {
     ...resourceData,
+    open_time: resourceData.open_time || '08:00',
+    close_time: resourceData.close_time || '20:00',
+    max_hours_per_booking: resourceData.max_hours_per_booking || 4.0,
     required_certifications: resourceData.required_certifications || [],
   });
   revalidatePath('/');

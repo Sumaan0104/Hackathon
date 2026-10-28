@@ -13,7 +13,8 @@ import {
   Send,
   AlertCircle,
   HelpCircle,
-  Lock
+  Lock,
+  ListOrdered
 } from 'lucide-react';
 
 interface BookingRequestModalProps {
@@ -23,7 +24,8 @@ interface BookingRequestModalProps {
   existingBookings?: Booking[];
   isOpen: boolean;
   onClose: () => void;
-  onSubmit: (resourceId: string, startTime: string, endTime: string, purpose: string) => Promise<void>;
+  onSubmit: (resourceId: string, startTime: string, endTime: string, purpose: string) => Promise<{ clash?: boolean; conflictingSlot?: any }>;
+  onJoinWaitlist: (resourceId: string, startTime: string, endTime: string, purpose: string) => Promise<void>;
 }
 
 export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
@@ -34,34 +36,45 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
   isOpen,
   onClose,
   onSubmit,
+  onJoinWaitlist,
 }) => {
   const [startDate, setStartDate] = useState('');
   const [startTime, setStartTime] = useState('10:00');
   const [endTime, setEndTime] = useState('12:00');
   const [purpose, setPurpose] = useState('');
-  const [eligibilityConfirmed, setEligibilityConfirmed] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [waitlistSubmitting, setWaitlistSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [serverClash, setServerClash] = useState<{ start: string; end: string; userName: string } | null>(null);
 
   useEffect(() => {
-    if (isOpen) {
+    if (isOpen && resource) {
       const tomorrow = new Date();
       tomorrow.setDate(tomorrow.getDate() + 1);
       setStartDate(tomorrow.toISOString().split('T')[0]);
+      
+      // Default times within resource operating hours
+      const open = resource.open_time || '08:00';
+      const openHour = parseInt(open.split(':')[0], 10);
+      const defaultStart = `${String(Math.max(openHour, 9)).padStart(2, '0')}:00`;
+      const defaultEnd = `${String(Math.min(openHour + 2, 21)).padStart(2, '0')}:00`;
+      
+      setStartTime(defaultStart);
+      setEndTime(defaultEnd);
       setErrorMsg(null);
-      setEligibilityConfirmed(false);
+      setServerClash(null);
     }
-  }, [isOpen]);
+  }, [isOpen, resource]);
 
   if (!isOpen || !resource) return null;
 
-  // Eligibility checking: Compare resource.required_certifications with currentProfile.certifications
+  // 1. Eligibility Check: Check if user lacks any required certificate
   const userCerts = currentProfile.certifications || [];
   const requiredCerts = resource.required_certifications || [];
   const missingCerts = requiredCerts.filter((c) => !userCerts.includes(c));
   const isEligibilityBlocked = missingCerts.length > 0;
 
-  // Compute requested duration
+  // 2. Times & Duration Calculation
   const startIso = startDate ? `${startDate}T${startTime}:00` : '';
   const endIso = startDate ? `${startDate}T${endTime}:00` : '';
   const startDateObj = startIso ? new Date(startIso) : null;
@@ -70,11 +83,21 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
     ? Math.max(0, (endDateObj.getTime() - startDateObj.getTime()) / (1000 * 60 * 60))
     : 0;
 
+  // 3. Operating Hours & Max Duration Checks
+  const openTime = resource.open_time || '08:00';
+  const closeTime = resource.close_time || '20:00';
+  const maxHours = resource.max_hours_per_booking || 4.0;
+
+  const isOutsideOperatingHours = startTime < openTime || endTime > closeTime;
+  const isExceedingMaxDuration = durationHours > maxHours;
+
+  // 4. Fair Use: Weekly Cap of 6.0 hours per user
   const userCap = currentProfile.weekly_hours_cap || 6.0;
+  const hoursLeft = Math.max(0, userCap - weeklyHours);
   const projectedWeeklyHours = weeklyHours + durationHours;
   const isCapExceeded = projectedWeeklyHours > userCap;
 
-  // Real-time clash detection with approved sessions for this resource
+  // 5. Live Clash Detection with approved/checked_in bookings
   const relevantBookings = existingBookings.filter(
     (b) => b.resource_id === resource.id && ['approved', 'checked_in'].includes(b.status)
   );
@@ -82,59 +105,91 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
   const startMs = startDateObj?.getTime() || 0;
   const endMs = endDateObj?.getTime() || 0;
 
-  const overlappingBooking = relevantBookings.find((b) => {
+  const localClash = relevantBookings.find((b) => {
     const bStart = new Date(b.start_time).getTime();
     const bEnd = new Date(b.end_time).getTime();
     return startMs < bEnd && endMs > bStart;
   });
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const activeClash = serverClash || (localClash ? {
+    start: localClash.start_time,
+    end: localClash.end_time,
+    userName: localClash.user_name || 'Another Student',
+  } : null);
+
+  const handleRegularSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
+    setServerClash(null);
 
-    // Strict front-end gate
+    // Front-end sanity checks
     if (isEligibilityBlocked) {
-      setErrorMsg(
-        `Eligibility Blocked: You do not possess the required certification(s): "${missingCerts.join(', ')}". Booking cannot proceed.`
-      );
+      setErrorMsg(`You're missing: ${missingCerts.join(', ')}`);
       return;
     }
 
-    if (!eligibilityConfirmed) {
-      setErrorMsg('Mandatory Verification: You must certify you meet the eligibility criteria.');
+    if (isOutsideOperatingHours) {
+      setErrorMsg(`Booking time is outside operating hours (${openTime} to ${closeTime}).`);
       return;
     }
 
-    if (durationHours <= 0) {
-      setErrorMsg('Validation Error: End time must be later than start time.');
+    if (isExceedingMaxDuration) {
+      setErrorMsg(`Exceeds maximum booking limit of ${maxHours.toFixed(1)} hours.`);
       return;
     }
 
     if (isCapExceeded) {
-      setErrorMsg(
-        `Weekly Quota Exceeded: You currently have ${weeklyHours.toFixed(1)}h booked this week. Requesting ${durationHours.toFixed(1)}h would reach ${projectedWeeklyHours.toFixed(1)}h, which exceeds your weekly cap of ${userCap}h.`
-      );
+      setErrorMsg(`Rule: Weekly cap of ${userCap.toFixed(1)} hours per user. You have ${weeklyHours.toFixed(1)}h booked (${hoursLeft.toFixed(1)}h left).`);
       return;
     }
 
-    if (purpose.trim().length < 8) {
-      setErrorMsg('Please enter a specific research or project purpose (minimum 8 characters).');
+    if (durationHours <= 0) {
+      setErrorMsg('End time must be after start time.');
+      return;
+    }
+
+    if (purpose.trim().length < 5) {
+      setErrorMsg('Please specify your academic or research purpose (at least 5 characters).');
       return;
     }
 
     try {
       setSubmitting(true);
-      await onSubmit(
-        resource.id, 
-        new Date(startIso).toISOString(), 
-        new Date(endIso).toISOString(), 
+      const res = await onSubmit(
+        resource.id,
+        new Date(startIso).toISOString(),
+        new Date(endIso).toISOString(),
         purpose.trim()
+      );
+
+      if (res && res.clash) {
+        setServerClash(res.conflictingSlot || { start: startIso, end: endIso, userName: 'Approved Session' });
+        setErrorMsg('Conflict: The requested time slot is already booked. You can join the fair-access waitlist below.');
+      } else {
+        onClose();
+      }
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Server rejected booking request.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleJoinWaitlistSubmit = async () => {
+    setErrorMsg(null);
+    try {
+      setWaitlistSubmitting(true);
+      await onJoinWaitlist(
+        resource.id,
+        new Date(startIso).toISOString(),
+        new Date(endIso).toISOString(),
+        purpose.trim() || 'Waitlist request due to time slot clash.'
       );
       onClose();
     } catch (err: any) {
-      setErrorMsg(err.message || 'Failed to submit booking request.');
+      setErrorMsg(err.message || 'Failed to join waitlist.');
     } finally {
-      setSubmitting(false);
+      setWaitlistSubmitting(false);
     }
   };
 
@@ -147,7 +202,7 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
           <div>
             <div className="flex items-center gap-2">
               <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
-                Reservation Request
+                Reserve Slot
               </span>
               <span className="text-xs text-zinc-400">
                 {resource.type.toUpperCase()}
@@ -166,53 +221,35 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
         </div>
 
         {/* Content */}
-        <form onSubmit={handleSubmit} className="p-5 space-y-4 overflow-y-auto flex-1 text-xs">
+        <form onSubmit={handleRegularSubmit} className="p-5 space-y-4 overflow-y-auto flex-1 text-xs">
           
-          {/* CRITICAL ELIGIBILITY BLOCKING BANNER */}
-          {isEligibilityBlocked ? (
-            <div className="rounded-2xl border-2 border-red-500 bg-red-50/90 dark:bg-red-950/60 p-4 space-y-2.5 text-xs text-red-900 dark:text-red-200 shadow-md">
+          {/* 1. Operating Hours & Policy Pill Bar */}
+          <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-xl bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700/60 text-[11px]">
+            <span className="flex items-center gap-1.5 text-zinc-600 dark:text-zinc-300">
+              <Clock className="h-3.5 w-3.5 text-indigo-500" />
+              <span>Open: <strong>{openTime} – {closeTime}</strong></span>
+            </span>
+            <span className="text-zinc-600 dark:text-zinc-300">
+              Max Booking: <strong>{maxHours.toFixed(1)}h</strong>
+            </span>
+            <span className="text-zinc-500">
+              Location: <strong>{resource.location}</strong>
+            </span>
+          </div>
+
+          {/* 2. ELIGIBILITY BLOCK: "You're missing: <name>" */}
+          {isEligibilityBlocked && (
+            <div className="rounded-2xl border-2 border-red-500 bg-red-50/90 dark:bg-red-950/60 p-4 space-y-2 text-xs text-red-900 dark:text-red-200 shadow-md">
               <div className="flex items-center gap-2 text-sm font-extrabold text-red-700 dark:text-red-300">
                 <ShieldAlert className="h-5 w-5 text-red-600 shrink-0" />
-                <span>Eligibility Blocked: Mandatory Certifications Missing</span>
+                <span>Eligibility Blocked: Missing Prerequisites</span>
               </div>
-              <p className="leading-relaxed">
-                You cannot reserve <strong>{resource.name}</strong> because your student profile lacks required prerequisite safety clearances:
+              <div className="p-2.5 rounded-xl bg-red-100 dark:bg-red-900/40 border border-red-300 dark:border-red-800 font-bold text-xs text-red-900 dark:text-red-100">
+                You&apos;re missing: {missingCerts.join(', ')}
+              </div>
+              <p className="text-[11px] text-red-800 dark:text-red-300">
+                Your profile has no record of this safety qualification. Complete the prerequisite training before booking this facility.
               </p>
-              <div className="p-2.5 rounded-xl bg-red-100 dark:bg-red-900/40 border border-red-300 dark:border-red-800 font-mono text-xs font-bold text-red-900 dark:text-red-100">
-                Missing Required: {missingCerts.join(', ')}
-              </div>
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between text-[11px] text-zinc-600 dark:text-zinc-400 gap-1 pt-1 border-t border-red-200 dark:border-red-900/60">
-                <span>
-                  Logged in as: <strong>{currentProfile.email}</strong> ({currentProfile.full_name})
-                </span>
-                <span>
-                  Certifications on file: <strong className="text-red-600 dark:text-red-400">{userCerts.length > 0 ? userCerts.join(', ') : 'None (0 on file)'}</strong>
-                </span>
-              </div>
-              <p className="text-[11px] text-red-800 dark:text-red-300 italic">
-                Notice: To unlock this facility, enroll in and pass the {missingCerts[0]} via the campus EHS safety portal.
-              </p>
-            </div>
-          ) : (
-            <div className="rounded-xl border border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/70 dark:bg-emerald-950/30 p-3.5 space-y-2">
-              <div className="flex items-center gap-1.5 font-bold text-emerald-900 dark:text-emerald-200">
-                <ShieldCheck className="h-4 w-4 text-emerald-600" />
-                <span>Eligibility Verified & Active</span>
-              </div>
-              <p className="text-emerald-800 dark:text-emerald-300 leading-normal">
-                {resource.eligibility_requirements}
-              </p>
-              <label className="flex items-start gap-2 pt-1 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={eligibilityConfirmed}
-                  onChange={(e) => setEligibilityConfirmed(e.target.checked)}
-                  className="mt-0.5 rounded border-emerald-400 text-indigo-600 focus:ring-indigo-500"
-                />
-                <span className="font-semibold text-zinc-800 dark:text-zinc-200">
-                  I certify that I hold verified credentials ({userCerts.join(', ') || 'Campus ID'}) and agree to standard laboratory safety protocols.
-                </span>
-              </label>
             </div>
           )}
 
@@ -223,11 +260,11 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
             </div>
           )}
 
-          {/* Date & Time Select */}
+          {/* 3. Date & Time Inputs */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <label className="block font-semibold text-zinc-700 dark:text-zinc-300 mb-1">
-                Requested Date
+                Booking Date
               </label>
               <input
                 type="date"
@@ -267,25 +304,48 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
             </div>
           </div>
 
-          {/* Conflict Indicator */}
-          {overlappingBooking ? (
-            <div className="p-3 rounded-xl bg-purple-50 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-800 text-purple-900 dark:text-purple-200 flex items-start gap-2.5">
-              <AlertCircle className="h-4 w-4 text-purple-600 shrink-0 mt-0.5" />
-              <div>
-                <strong>Schedule Clash Detected</strong>
-                <div className="text-[11px] text-purple-800 dark:text-purple-300 mt-0.5">
-                  This slot overlaps with an approved booking by <strong>{overlappingBooking.user_name}</strong>. Submitting will automatically place your request on the <strong>Fair-Access Waitlist</strong> (ordered by least recent use).
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="p-2.5 rounded-xl bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300 flex items-center gap-2">
-              <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
-              <span>Time slot is currently clear with no conflicts.</span>
+          {/* Operating hours validation warnings */}
+          {isOutsideOperatingHours && (
+            <div className="p-2.5 rounded-xl bg-amber-50 text-amber-800 border border-amber-300 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-700 text-[11px] flex items-center gap-2">
+              <AlertCircle className="h-4 w-4 shrink-0" />
+              <span>Outside Operating Hours: This facility is only open from {openTime} to {closeTime}.</span>
             </div>
           )}
 
-          {/* Weekly Quota Cap Breakdown */}
+          {isExceedingMaxDuration && (
+            <div className="p-2.5 rounded-xl bg-amber-50 text-amber-800 border border-amber-300 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-700 text-[11px] flex items-center gap-2">
+              <AlertCircle className="h-4 w-4 shrink-0" />
+              <span>Duration Limit Exceeded: Single booking cannot exceed {maxHours.toFixed(1)} hours (selected: {durationHours.toFixed(1)}h).</span>
+            </div>
+          )}
+
+          {/* 4. CLASH DETECTION & WAITLIST CTA */}
+          {activeClash && (
+            <div className="rounded-2xl border-2 border-purple-500 bg-purple-50/90 dark:bg-purple-950/60 p-4 space-y-3 text-xs text-purple-950 dark:text-purple-100 shadow-md">
+              <div className="flex items-center gap-2 font-bold text-sm text-purple-800 dark:text-purple-200">
+                <AlertCircle className="h-5 w-5 text-purple-600 shrink-0" />
+                <span>Schedule Clash: Slot Already Reserved</span>
+              </div>
+              <div className="p-2.5 rounded-xl bg-purple-100 dark:bg-purple-900/40 border border-purple-300 dark:border-purple-800">
+                <div>Conflicting slot: <strong>{new Date(activeClash.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} – {new Date(activeClash.end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</strong></div>
+                <div className="text-[11px] text-purple-700 dark:text-purple-300 mt-0.5">Approved user: {activeClash.userName}</div>
+              </div>
+              <p className="text-[11px] leading-relaxed">
+                You cannot double-book this active session. However, you can join the <strong>Fair-Access Waitlist</strong> (ordered by least recent use). If the slot opens or is cancelled, waitlisted users are granted access.
+              </p>
+              <button
+                type="button"
+                onClick={handleJoinWaitlistSubmit}
+                disabled={waitlistSubmitting || isEligibilityBlocked || isCapExceeded}
+                className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold transition-colors shadow-xs cursor-pointer disabled:opacity-50"
+              >
+                <ListOrdered className="h-4 w-4" />
+                <span>{waitlistSubmitting ? 'Joining Waitlist...' : 'Join Waitlist (Least Recent Use Priority)'}</span>
+              </button>
+            </div>
+          )}
+
+          {/* 5. FAIR USE: WEEKLY CAP OF 6 HOURS */}
           <div className={`p-3.5 rounded-xl border ${
             isCapExceeded
               ? 'bg-red-50 dark:bg-red-950/40 border-red-300 dark:border-red-800'
@@ -294,14 +354,14 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
             <div className="flex items-center justify-between mb-1.5">
               <span className="font-semibold text-zinc-700 dark:text-zinc-300 flex items-center gap-1.5">
                 <Clock className="h-3.5 w-3.5 text-indigo-500" />
-                <span>Weekly Hours Quota Engine (Default 6.0h cap)</span>
+                <span>Rule: Weekly cap of 6.0 hours per user</span>
               </span>
               <span className={`font-mono font-bold ${isCapExceeded ? 'text-red-600' : 'text-emerald-600'}`}>
                 {projectedWeeklyHours.toFixed(1)}h / {userCap.toFixed(1)}h
               </span>
             </div>
 
-            {/* Visual Progress Bar */}
+            {/* Visual Bar */}
             <div className="w-full h-2 rounded-full bg-zinc-200 dark:bg-zinc-700 overflow-hidden flex">
               <div 
                 style={{ width: `${Math.min(100, (weeklyHours / userCap) * 100)}%` }} 
@@ -316,29 +376,35 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
             </div>
 
             <div className="mt-2 flex justify-between text-[11px] text-zinc-500">
-              <span>Booked so far: <strong>{weeklyHours.toFixed(1)}h</strong></span>
-              <span>This request: <strong>+{durationHours.toFixed(1)}h</strong></span>
-              <span>Available left: <strong>{Math.max(0, userCap - weeklyHours).toFixed(1)}h</strong></span>
+              <span>You have <strong>{weeklyHours.toFixed(1)}h</strong> booked</span>
+              <span><strong>{hoursLeft.toFixed(1)}h left</strong> this week</span>
+              <span>Requested: <strong>+{durationHours.toFixed(1)}h</strong></span>
             </div>
+
+            {isCapExceeded && (
+              <div className="mt-2 text-[11px] text-red-600 dark:text-red-400 font-semibold">
+                ⚠️ Weekly cap exceeded: Requesting {durationHours.toFixed(1)} hours would total {projectedWeeklyHours.toFixed(1)} hours, exceeding your {userCap.toFixed(1)}h limit.
+              </div>
+            )}
           </div>
 
-          {/* Purpose */}
+          {/* 6. Purpose Input */}
           <div>
             <label className="block font-semibold text-zinc-700 dark:text-zinc-300 mb-1">
-              Academic & Research Justification
+              Purpose & Project Description
             </label>
             <textarea
               rows={3}
               value={purpose}
               onChange={(e) => setPurpose(e.target.value)}
               disabled={isEligibilityBlocked}
-              placeholder="State project details, faculty advisor or capstone scope (e.g. Senior Capstone: High-Speed Optical Dispersion Characterization)."
+              placeholder="State your academic or research purpose (e.g. Laser spectroscopy measurement for Senior Capstone project)."
               required
               className="w-full text-xs rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 p-3 text-zinc-900 dark:text-white placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50"
             />
           </div>
 
-          {/* Footer Submit */}
+          {/* Footer Submit Button */}
           <div className="pt-2 flex items-center justify-end gap-2 border-t border-zinc-100 dark:border-zinc-800">
             <button
               type="button"
@@ -349,22 +415,36 @@ export const BookingRequestModal: React.FC<BookingRequestModalProps> = ({
             </button>
             <button
               type="submit"
-              disabled={submitting || isCapExceeded || isEligibilityBlocked || !eligibilityConfirmed}
+              disabled={
+                submitting || 
+                isEligibilityBlocked || 
+                isOutsideOperatingHours || 
+                isExceedingMaxDuration || 
+                isCapExceeded || 
+                Boolean(activeClash)
+              }
               className={`flex items-center gap-1.5 px-5 py-2 font-semibold rounded-xl shadow-xs transition-colors cursor-pointer ${
                 isEligibilityBlocked
                   ? 'bg-zinc-400 text-white cursor-not-allowed opacity-60'
+                  : Boolean(activeClash)
+                  ? 'bg-zinc-300 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400 cursor-not-allowed'
                   : 'bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white'
               }`}
             >
               {isEligibilityBlocked ? (
                 <>
                   <Lock className="h-3.5 w-3.5" />
-                  <span>Blocked: Missing Required Certification</span>
+                  <span>You&apos;re missing: {missingCerts.join(', ')}</span>
+                </>
+              ) : activeClash ? (
+                <>
+                  <AlertCircle className="h-3.5 w-3.5" />
+                  <span>Slot Taken (Join Waitlist Above)</span>
                 </>
               ) : (
                 <>
                   <Send className="h-3.5 w-3.5" />
-                  <span>{submitting ? 'Submitting...' : overlappingBooking ? 'Join Priority Waitlist' : 'Submit Reservation'}</span>
+                  <span>{submitting ? 'Submitting...' : 'Submit Request (Status: Pending)'}</span>
                 </>
               )}
             </button>
