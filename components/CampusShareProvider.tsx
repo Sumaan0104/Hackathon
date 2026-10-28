@@ -11,6 +11,7 @@ import {
   IncidentType,
   IncidentSeverity,
   InspectionChecklist,
+  ConditionRating,
   InAppNotification
 } from '@/lib/types';
 import { 
@@ -21,6 +22,7 @@ import {
   checkInAction, 
   returnAction, 
   reportIncidentAction, 
+  resolveIncidentAction,
   createResourceAction,
   getWaitlistQueueAction,
   resetDemoDataAction,
@@ -34,6 +36,7 @@ import { WaitlistQueueModal } from './WaitlistQueueModal';
 import { CheckInModal } from './CheckInModal';
 import { ReturnModal } from './ReturnModal';
 import { IncidentReportModal } from './IncidentReportModal';
+import { ResolveIncidentModal } from './ResolveIncidentModal';
 import { CreateResourceModal } from './CreateResourceModal';
 import { ArchitectureModal } from './ArchitectureModal';
 
@@ -56,6 +59,7 @@ interface CampusShareContextType {
   openCheckInModal: (booking: Booking) => void;
   openReturnModal: (booking: Booking) => void;
   openIncidentModal: (booking: Booking) => void;
+  openResolveIncidentModal: (incident: IncidentReport) => void;
   openCreateResourceModal: () => void;
   openArchitectureModal: () => void;
   resetDemoData: () => Promise<void>;
@@ -94,6 +98,7 @@ export const CampusShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
   // Modals state
   const [selectedResource, setSelectedResource] = useState<Resource | null>(null);
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
+  const [selectedIncident, setSelectedIncident] = useState<IncidentReport | null>(null);
   const [waitlistQueue, setWaitlistQueue] = useState<any[]>([]);
 
   const [isBookingOpen, setIsBookingOpen] = useState(false);
@@ -102,6 +107,7 @@ export const CampusShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
   const [isCheckInOpen, setIsCheckInOpen] = useState(false);
   const [isReturnOpen, setIsReturnOpen] = useState(false);
   const [isIncidentOpen, setIsIncidentOpen] = useState(false);
+  const [isResolveIncidentOpen, setIsResolveIncidentOpen] = useState(false);
   const [isCreateResourceOpen, setIsCreateResourceOpen] = useState(false);
   const [isArchitectureOpen, setIsArchitectureOpen] = useState(false);
 
@@ -218,11 +224,20 @@ export const CampusShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
     showToast('Arrival check-in confirmed & physical inspection logged to audit trail.', 'success');
   };
 
-  // Handler for return with checklist
-  const handleReturnSubmit = async (bookingId: string, notes: string, checklist: InspectionChecklist) => {
-    await returnAction(currentProfile.email || currentProfile.id, bookingId, notes, checklist);
+  // Handler for return with checklist & condition rating
+  const handleReturnSubmit = async (
+    bookingId: string, 
+    notes: string, 
+    rating: ConditionRating, 
+    checklist: InspectionChecklist
+  ) => {
+    const res = await returnAction(currentProfile.email || currentProfile.id, bookingId, notes, rating, checklist);
     await loadData(currentProfile.email || currentProfile.id);
-    showToast('Departure verified: Equipment returned in good standing!', 'success');
+    if (res.isLate) {
+      showToast(`Departure verified: Resource returned late (+${res.lateMinutes}m delay recorded). No automated penalties applied.`, 'info');
+    } else {
+      showToast('Departure verified: Equipment returned on time in good standing!', 'success');
+    }
   };
 
   // Handler for incident report
@@ -235,6 +250,13 @@ export const CampusShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
     await reportIncidentAction(currentProfile.email || currentProfile.id, bookingId, type, severity, description);
     await loadData(currentProfile.email || currentProfile.id);
     showToast(`Incident report recorded. No automated penalty applied under campus policy.`, 'info');
+  };
+
+  // Handler for resolving incident
+  const handleResolveIncidentSubmit = async (incidentId: string, resolutionNotes: string) => {
+    await resolveIncidentAction(currentProfile.email || currentProfile.id, incidentId, resolutionNotes);
+    await loadData(currentProfile.email || currentProfile.id);
+    showToast('Incident marked resolved by facility custodian. Audit trail updated.', 'success');
   };
 
   // Handler for resource creation
@@ -289,6 +311,11 @@ export const CampusShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
     setIsIncidentOpen(true);
   };
 
+  const openResolveIncidentModal = (incident: IncidentReport) => {
+    setSelectedIncident(incident);
+    setIsResolveIncidentOpen(true);
+  };
+
   const openCreateResourceModal = () => {
     setIsCreateResourceOpen(true);
   };
@@ -318,6 +345,7 @@ export const CampusShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
         openCheckInModal,
         openReturnModal,
         openIncidentModal,
+        openResolveIncidentModal,
         openCreateResourceModal,
         openArchitectureModal,
         resetDemoData: handleResetDemoData,
@@ -418,6 +446,13 @@ export const CampusShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
           isOpen={isIncidentOpen}
           onClose={() => setIsIncidentOpen(false)}
           onSubmitIncident={handleIncidentSubmit}
+        />
+
+        <ResolveIncidentModal
+          incident={selectedIncident}
+          isOpen={isResolveIncidentOpen}
+          onClose={() => setIsResolveIncidentOpen(false)}
+          onSubmitResolve={handleResolveIncidentSubmit}
         />
 
         <CreateResourceModal

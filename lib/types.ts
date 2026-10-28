@@ -11,7 +11,9 @@ export type BookingStatus =
   | 'completed' 
   | 'cancelled';
 
-export type IncidentType = 'delay' | 'damage' | 'incident';
+export type ConditionRating = 'good' | 'minor wear' | 'damaged';
+
+export type IncidentType = 'damage' | 'delay' | 'safety' | 'conflict' | 'incident';
 export type IncidentSeverity = 'low' | 'medium' | 'high';
 export type IncidentResolutionStatus = 'investigating' | 'resolved' | 'acknowledged';
 
@@ -77,8 +79,11 @@ export interface Booking {
   checkin_checklist?: InspectionChecklist;
   checked_in_at?: string;
   return_condition_notes?: string;
+  return_condition_rating?: ConditionRating;
   return_checklist?: InspectionChecklist;
   returned_at?: string;
+  is_late?: boolean;
+  late_minutes?: number;
   clash_detected?: boolean;
   created_at: string;
   updated_at: string;
@@ -96,6 +101,9 @@ export interface IncidentReport {
   status: IncidentResolutionStatus;
   description: string;
   resolution_notes?: string;
+  resolved_at?: string;
+  resolved_by?: string;
+  resolved_by_name?: string;
   created_at: string;
 }
 

@@ -11,6 +11,7 @@ import {
   InspectionChecklist,
   IncidentType,
   IncidentSeverity,
+  ConditionRating,
   InAppNotification
 } from './types';
 import { 
@@ -686,27 +687,39 @@ class CampusShareStore {
   ): Booking {
     this.loadFromDisk();
     const booking = this.bookings.get(bookingId);
-    if (!booking) throw new Error('Booking not found.');
+    if (!booking) throw new Error('Booking record not found.');
 
     if (booking.status !== 'approved') {
       throw new Error(`Invalid lifecycle state: Booking status is '${booking.status}', must be 'approved' to check in.`);
     }
 
     const resource = this.resources.get(booking.resource_id);
-    const isBorrower = booking.user_id === actor.id;
-    const isOwner = resource?.owner_id === actor.id;
+    const isBorrower = booking.user_id === actor.id || booking.user_email === actor.email;
+    const isOwner = resource?.owner_id === actor.id || resource?.owner_name === actor.full_name;
     const isPrivileged = ['manager', 'admin'].includes(actor.role);
 
     if (!isBorrower && !isOwner && !isPrivileged) {
-      throw new Error('Unauthorized: Only the borrower, facility owner, or administrators can check in.');
+      throw new Error('Unauthorized Access: Only the designated borrower, facility custodian, or administrators can check in.');
     }
 
-    if (!conditionNotes || conditionNotes.trim().length < 3) {
-      throw new Error('Physical condition inspection notes are mandatory upon arrival.');
+    // 1. Strictly verify the booked window
+    const now = new Date();
+    const startTime = new Date(booking.start_time);
+    const endTime = new Date(booking.end_time);
+    if (now.getTime() < startTime.getTime() || now.getTime() > endTime.getTime()) {
+      const startStr = startTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const endStr = endTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const dateStr = startTime.toLocaleDateString();
+      throw new Error(`Check-in Window Violation: Check-in is only permitted within the scheduled reservation window (${dateStr} from ${startStr} to ${endStr}). Current time is outside this window.`);
+    }
+
+    // 2. Minimum 10 characters for arrival condition notes
+    if (!conditionNotes || conditionNotes.trim().length < 10) {
+      throw new Error(`Mandatory Inspection Rule: Arrival physical condition notes must be at least 10 characters (provided: ${conditionNotes ? conditionNotes.trim().length : 0} characters).`);
     }
 
     booking.status = 'checked_in';
-    booking.checked_in_at = new Date().toISOString();
+    booking.checked_in_at = now.toISOString();
     booking.checkin_condition_notes = conditionNotes.trim();
     booking.checkin_checklist = checklist || {
       physicalChecked: true,
@@ -714,13 +727,17 @@ class CampusShareStore {
       safetySecured: true,
       accessoriesPresent: true,
     };
-    booking.updated_at = new Date().toISOString();
+    booking.updated_at = now.toISOString();
 
     this.bookings.set(booking.id, booking);
 
-    this.logAction(actor, 'BOOKING_CHECKED_IN', 'booking', booking.id, {
+    // 3. Write CHECKED_IN to audit_log
+    this.logAction(actor, 'CHECKED_IN', 'booking', booking.id, {
       condition_notes: booking.checkin_condition_notes,
       checklist: booking.checkin_checklist,
+      checked_in_at: booking.checked_in_at,
+      resource_id: booking.resource_id,
+      borrower_id: booking.user_id,
     });
 
     this.saveToDisk();
@@ -731,49 +748,83 @@ class CampusShareStore {
     actor: Profile, 
     bookingId: string, 
     conditionNotes: string, 
+    conditionRating: ConditionRating,
     checklist?: InspectionChecklist
-  ): Booking {
+  ): { booking: Booking; isLate: boolean; lateMinutes: number } {
     this.loadFromDisk();
     const booking = this.bookings.get(bookingId);
-    if (!booking) throw new Error('Booking not found.');
+    if (!booking) throw new Error('Booking record not found.');
 
     if (booking.status !== 'checked_in') {
-      throw new Error(`Invalid lifecycle state: Booking must be in 'checked_in' state to record departure return.`);
+      throw new Error(`Invalid lifecycle state: Booking must be in 'checked_in' state to record departure return (current status: '${booking.status}').`);
     }
 
     const resource = this.resources.get(booking.resource_id);
-    const isBorrower = booking.user_id === actor.id;
-    const isOwner = resource?.owner_id === actor.id;
+    const isBorrower = booking.user_id === actor.id || booking.user_email === actor.email;
+    const isOwner = resource?.owner_id === actor.id || resource?.owner_name === actor.full_name;
     const isPrivileged = ['manager', 'admin'].includes(actor.role);
 
     if (!isBorrower && !isOwner && !isPrivileged) {
-      throw new Error('Unauthorized to record resource return.');
+      throw new Error('Unauthorized Access: Only the borrower, facility custodian, or administrators can record return.');
     }
 
-    if (!conditionNotes || conditionNotes.trim().length < 3) {
-      throw new Error('Final return condition notes are mandatory upon departure.');
+    // 1. Minimum 10 characters for return notes
+    if (!conditionNotes || conditionNotes.trim().length < 10) {
+      throw new Error(`Mandatory Inspection Rule: Departure return condition notes must be at least 10 characters (provided: ${conditionNotes ? conditionNotes.trim().length : 0} characters).`);
     }
+
+    // 2. Condition rating check
+    if (!['good', 'minor wear', 'damaged'].includes(conditionRating)) {
+      throw new Error('Compliance Violation: Condition rating is mandatory upon return (choose: good, minor wear, or damaged).');
+    }
+
+    // 3. Late detection & delay calculation in minutes
+    const now = new Date();
+    const scheduledEnd = new Date(booking.end_time);
+    const isLate = now.getTime() > scheduledEnd.getTime();
+    const lateMinutes = isLate ? Math.max(1, Math.round((now.getTime() - scheduledEnd.getTime()) / 60000)) : 0;
 
     booking.status = 'completed';
-    booking.returned_at = new Date().toISOString();
+    booking.returned_at = now.toISOString();
     booking.return_condition_notes = conditionNotes.trim();
+    booking.return_condition_rating = conditionRating;
+    booking.is_late = isLate;
+    booking.late_minutes = lateMinutes;
     booking.return_checklist = checklist || {
       physicalChecked: true,
       cleanlinessVerified: true,
       safetySecured: true,
       accessoriesPresent: true,
     };
-    booking.updated_at = new Date().toISOString();
+    booking.updated_at = now.toISOString();
 
     this.bookings.set(booking.id, booking);
 
-    this.logAction(actor, 'BOOKING_RETURNED', 'booking', booking.id, {
+    // 4. Write RETURNED to audit_log
+    this.logAction(actor, 'RETURNED', 'booking', booking.id, {
       return_notes: booking.return_condition_notes,
-      checklist: booking.return_checklist,
+      condition_rating: conditionRating,
+      is_late: isLate,
+      delay_minutes: lateMinutes,
+      returned_at: booking.returned_at,
+      resource_id: booking.resource_id,
+      borrower_id: booking.user_id,
     });
 
+    // 5. If late, write LATE_RETURN to audit_log
+    if (isLate) {
+      this.logAction(actor, 'LATE_RETURN', 'booking', booking.id, {
+        delay_minutes: lateMinutes,
+        scheduled_end: booking.end_time,
+        returned_at: booking.returned_at,
+        borrower_name: booking.user_name,
+        resource_id: booking.resource_id,
+        resource_name: resource?.name,
+      });
+    }
+
     this.saveToDisk();
-    return booking;
+    return { booking, isLate, lateMinutes };
   }
 
   reportIncident(
@@ -785,19 +836,23 @@ class CampusShareStore {
   ): IncidentReport {
     this.loadFromDisk();
     const booking = this.bookings.get(bookingId);
-    if (!booking) throw new Error('Booking not found.');
+    if (!booking) throw new Error('Booking record not found.');
 
     const resource = this.resources.get(booking.resource_id);
-    const isBorrower = booking.user_id === actor.id;
-    const isOwner = resource?.owner_id === actor.id;
+    const isBorrower = booking.user_id === actor.id || booking.user_email === actor.email;
+    const isOwner = resource?.owner_id === actor.id || resource?.owner_name === actor.full_name;
     const isPrivileged = ['manager', 'admin'].includes(actor.role);
 
     if (!isBorrower && !isOwner && !isPrivileged) {
-      throw new Error('Unauthorized to report incidents on this booking.');
+      throw new Error('Unauthorized Access: Only the borrower, facility custodian, or administrators can report incidents.');
     }
 
-    if (!description || description.trim().length < 5) {
-      throw new Error('Detailed description of at least 5 characters is required.');
+    if (!['damage', 'delay', 'safety', 'conflict', 'incident'].includes(type)) {
+      throw new Error('Invalid incident type: must be damage, delay, safety, or conflict.');
+    }
+
+    if (!description || description.trim().length < 10) {
+      throw new Error(`Incident Reporting Rule: Incident description must be at least 10 characters (provided: ${description ? description.trim().length : 0} characters).`);
     }
 
     const incident: IncidentReport = {
@@ -808,7 +863,7 @@ class CampusShareStore {
       reporter_name: actor.full_name,
       reporter_role: actor.role,
       type,
-      severity,
+      severity: severity || 'low',
       status: 'acknowledged',
       description: description.trim(),
       created_at: new Date().toISOString(),
@@ -819,13 +874,75 @@ class CampusShareStore {
     this.logAction(actor, 'INCIDENT_REPORTED', 'incident', incident.id, {
       booking_id: bookingId,
       incident_type: type,
-      severity,
+      severity: incident.severity,
       description: incident.description,
       governance_policy: 'Logged for review. No automated penalties applied.',
     });
 
     this.saveToDisk();
     return incident;
+  }
+
+  resolveIncident(
+    actor: Profile,
+    incidentId: string,
+    resolutionNotes: string
+  ): IncidentReport {
+    this.loadFromDisk();
+    const incident = this.incidents.get(incidentId);
+    if (!incident) throw new Error('Incident report record not found.');
+
+    const booking = this.bookings.get(incident.booking_id);
+    const resource = booking ? this.resources.get(booking.resource_id) : undefined;
+
+    const isOwner = resource ? (resource.owner_id === actor.id || resource.owner_name === actor.full_name) : false;
+    const isPrivileged = ['manager', 'admin'].includes(actor.role);
+
+    if (!isOwner && !isPrivileged) {
+      throw new Error('Unauthorized Access: Only facility custodians or administrators have authority to mark incidents resolved.');
+    }
+
+    if (!resolutionNotes || resolutionNotes.trim().length < 10) {
+      throw new Error(`Resolution Justification Rule: Written resolution note must be at least 10 characters (provided: ${resolutionNotes ? resolutionNotes.trim().length : 0} characters).`);
+    }
+
+    const now = new Date().toISOString();
+    incident.status = 'resolved';
+    incident.resolution_notes = resolutionNotes.trim();
+    incident.resolved_at = now;
+    incident.resolved_by = actor.id;
+    incident.resolved_by_name = actor.full_name;
+
+    this.incidents.set(incident.id, incident);
+
+    this.logAction(actor, 'INCIDENT_RESOLVED', 'incident', incident.id, {
+      booking_id: incident.booking_id,
+      resolution_notes: incident.resolution_notes,
+      resolved_by: actor.full_name,
+      resolved_by_role: actor.role,
+      resolved_at: now,
+      governance_policy: 'Resolved by custodian. No automated penalties applied.',
+    });
+
+    this.saveToDisk();
+    return incident;
+  }
+
+  getBooking(bookingId: string): Booking | undefined {
+    this.loadFromDisk();
+    return this.bookings.get(bookingId);
+  }
+
+  getIncidentsByBooking(bookingId: string): IncidentReport[] {
+    this.loadFromDisk();
+    return Array.from(this.incidents.values()).filter((inc) => inc.booking_id === bookingId);
+  }
+
+  getAuditLogsByBooking(bookingId: string): AuditLogEntry[] {
+    this.loadFromDisk();
+    return this.auditLogs.filter(
+      (entry) => entry.target_id === bookingId || entry.details?.booking_id === bookingId
+    );
   }
 
   getWaitlistByLeastRecentUse(resourceId: string): Array<Booking & { lastUsedAt: string | null; priorityScore: number }> {

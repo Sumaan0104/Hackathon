@@ -19,7 +19,10 @@ import {
   ShieldAlert,
   ListOrdered,
   FileText,
-  Hourglass
+  Hourglass,
+  History,
+  Sparkles,
+  Wrench
 } from 'lucide-react';
 import { FormattedDate } from '@/components/FormattedDate';
 
@@ -171,31 +174,54 @@ export default function BookingsPage() {
         ) : null}
 
         {/* Condition Notes (Check-In & Return History) */}
-        {(booking.checkin_condition_notes || booking.return_condition_notes) && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1 text-xs">
-            {booking.checkin_condition_notes && (
-              <div className="p-3 rounded-xl bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800">
-                <span className="font-bold text-emerald-900 dark:text-emerald-200 flex items-center gap-1 mb-1">
-                  <ClipboardCheck className="h-4 w-4 text-emerald-600" />
-                  Check-In Condition Notes:
-                </span>
-                <p className="text-[11px] text-emerald-800 dark:text-emerald-300">
-                  {booking.checkin_condition_notes}
-                </p>
-              </div>
-            )}
+        {(booking.checkin_condition_notes || booking.return_condition_notes || booking.return_condition_rating || booking.is_late) && (
+          <div className="space-y-2 pt-1 text-xs">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {booking.checkin_condition_notes && (
+                <div className="p-3 rounded-xl bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800">
+                  <span className="font-bold text-emerald-900 dark:text-emerald-200 flex items-center gap-1 mb-1">
+                    <ClipboardCheck className="h-4 w-4 text-emerald-600" />
+                    Arrival Inspection Notes:
+                  </span>
+                  <p className="text-[11px] text-emerald-800 dark:text-emerald-300">
+                    {booking.checkin_condition_notes}
+                  </p>
+                </div>
+              )}
 
-            {booking.return_condition_notes && (
-              <div className="p-3 rounded-xl bg-blue-50/70 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800">
-                <span className="font-bold text-blue-900 dark:text-blue-200 flex items-center gap-1 mb-1">
-                  <RotateCcw className="h-4 w-4 text-blue-600" />
-                  Return Condition Notes:
-                </span>
-                <p className="text-[11px] text-blue-800 dark:text-blue-300">
-                  {booking.return_condition_notes}
-                </p>
-              </div>
-            )}
+              {(booking.return_condition_notes || booking.return_condition_rating) && (
+                <div className="p-3 rounded-xl bg-blue-50/70 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-blue-900 dark:text-blue-200 flex items-center gap-1">
+                      <RotateCcw className="h-4 w-4 text-blue-600" />
+                      Departure Return:
+                    </span>
+                    {booking.return_condition_rating && (
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+                        booking.return_condition_rating === 'good' 
+                          ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300' 
+                          : booking.return_condition_rating === 'minor wear'
+                          ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
+                          : 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
+                      }`}>
+                        Rating: {booking.return_condition_rating}
+                      </span>
+                    )}
+                  </div>
+                  {booking.return_condition_notes && (
+                    <p className="text-[11px] text-blue-800 dark:text-blue-300">
+                      {booking.return_condition_notes}
+                    </p>
+                  )}
+                  {booking.is_late && (
+                    <div className="flex items-center gap-1 text-[11px] font-semibold text-rose-600 dark:text-rose-400">
+                      <Clock className="h-3.5 w-3.5" />
+                      <span>Returned late (+{booking.late_minutes}m delay)</span>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         )}
 
@@ -213,16 +239,40 @@ export default function BookingsPage() {
             </button>
           )}
 
-          {/* Borrower Check-In Action */}
-          {booking.status === 'approved' && (
-            <button
-              onClick={() => openCheckInModal(booking)}
-              className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-xl shadow-xs transition-colors cursor-pointer"
-            >
-              <ClipboardCheck className="h-4 w-4" />
-              <span>Check-In (Submit Arrival Condition Notes)</span>
-            </button>
-          )}
+          {/* Borrower Check-In Action: Only visible within the booked window per Rule 1 */}
+          {booking.status === 'approved' && (() => {
+            const nowTime = new Date().getTime();
+            const startTime = new Date(booking.start_time).getTime();
+            const endTime = new Date(booking.end_time).getTime();
+            const isWithinWindow = nowTime >= startTime && nowTime <= endTime;
+            const isBeforeWindow = nowTime < startTime;
+
+            if (isWithinWindow) {
+              return (
+                <button
+                  onClick={() => openCheckInModal(booking)}
+                  className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-xl shadow-xs transition-colors cursor-pointer"
+                >
+                  <ClipboardCheck className="h-4 w-4" />
+                  <span>Check-In (Submit Arrival Condition Notes)</span>
+                </button>
+              );
+            } else if (isBeforeWindow) {
+              return (
+                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 text-xs font-medium border border-zinc-200 dark:border-zinc-700">
+                  <Clock className="h-3.5 w-3.5 text-zinc-500" />
+                  <span>Check-in opens {new Date(booking.start_time).toLocaleDateString()} at {new Date(booking.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                </div>
+              );
+            } else {
+              return (
+                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 text-xs font-medium border border-amber-200 dark:border-amber-800">
+                  <AlertCircle className="h-3.5 w-3.5" />
+                  <span>Check-in window closed</span>
+                </div>
+              );
+            }
+          })()}
 
           {/* Return Resource Action */}
           {booking.status === 'checked_in' && (
@@ -235,16 +285,23 @@ export default function BookingsPage() {
             </button>
           )}
 
-          {/* Incident / Delay Reporting */}
-          {(booking.status === 'approved' || booking.status === 'checked_in' || booking.status === 'completed') && (
-            <button
-              onClick={() => openIncidentModal(booking)}
-              className="flex items-center gap-1.5 px-3 py-2 bg-zinc-100 hover:bg-rose-50 text-zinc-700 hover:text-rose-700 dark:bg-zinc-800 dark:hover:bg-rose-950 dark:text-zinc-300 dark:hover:text-rose-300 text-xs font-semibold rounded-xl transition-colors cursor-pointer"
-            >
-              <Flag className="h-4 w-4" />
-              <span>Report Delay / Damage</span>
-            </button>
-          )}
+          {/* Incident / Delay Reporting: on ANY booking per Rule 3 */}
+          <button
+            onClick={() => openIncidentModal(booking)}
+            className="flex items-center gap-1.5 px-3 py-2 bg-zinc-100 hover:bg-rose-50 text-zinc-700 hover:text-rose-700 dark:bg-zinc-800 dark:hover:bg-rose-950 dark:text-zinc-300 dark:hover:text-rose-300 text-xs font-semibold rounded-xl transition-colors cursor-pointer"
+          >
+            <Flag className="h-4 w-4" />
+            <span>Report Incident</span>
+          </button>
+
+          {/* View Timeline / Booking Detail Page per Rule 4 */}
+          <Link
+            href={`/bookings/${booking.id}`}
+            className="flex items-center gap-1.5 px-3 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-950/60 dark:hover:bg-indigo-900/60 dark:text-indigo-300 text-xs font-semibold rounded-xl transition-colors cursor-pointer"
+          >
+            <History className="h-4 w-4" />
+            <span>View Timeline &rarr;</span>
+          </Link>
 
           {/* Waitlist View */}
           {resource && booking.status === 'waitlisted' && (

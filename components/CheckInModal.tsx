@@ -37,8 +37,8 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!conditionNotes || conditionNotes.trim().length < 3) {
-      setErrorMsg('Mandatory: Please record physical condition notes upon check-in.');
+    if (!conditionNotes || conditionNotes.trim().length < 10) {
+      setErrorMsg('Mandatory Rule: Arrival condition inspection notes must be at least 10 characters.');
       return;
     }
 
@@ -52,6 +52,9 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({
       setSubmitting(false);
     }
   };
+
+  const charCount = conditionNotes.trim().length;
+  const isNotesValid = charCount >= 10;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150">
@@ -116,9 +119,14 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({
           </div>
 
           <div>
-            <label className="block font-semibold text-zinc-700 dark:text-zinc-300 mb-1">
-              Condition Notes & Baseline Inspection Log
-            </label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="font-semibold text-zinc-700 dark:text-zinc-300">
+                Condition Notes & Baseline Inspection Log (min 10 chars)
+              </label>
+              <span className={`text-[11px] font-mono ${charCount >= 10 ? 'text-emerald-600 dark:text-emerald-400 font-semibold' : 'text-zinc-500'}`}>
+                {charCount} / 10 min
+              </span>
+            </div>
             <textarea
               rows={3}
               value={conditionNotes}
@@ -141,8 +149,8 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({
             </button>
             <button
               type="submit"
-              disabled={submitting}
-              className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-xl shadow-xs transition-colors cursor-pointer"
+              disabled={submitting || !isNotesValid}
+              className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold rounded-xl shadow-xs transition-colors cursor-pointer"
             >
               <ClipboardCheck className="h-4 w-4" />
               <span>{submitting ? 'Verifying...' : 'Authorize Check-In'}</span>

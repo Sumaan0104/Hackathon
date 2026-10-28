@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { Booking, IncidentType, IncidentSeverity } from '@/lib/types';
-import { X, AlertTriangle, ShieldCheck, Flag, Flame, Clock, AlertCircle } from 'lucide-react';
+import { X, AlertTriangle, ShieldCheck, Flag, Flame, Clock, ShieldAlert, Users } from 'lucide-react';
 
 interface IncidentReportModalProps {
   booking: Booking | null;
@@ -17,7 +17,7 @@ export const IncidentReportModal: React.FC<IncidentReportModalProps> = ({
   onClose,
   onSubmitIncident,
 }) => {
-  const [type, setType] = useState<IncidentType>('delay');
+  const [type, setType] = useState<IncidentType>('damage');
   const [severity, setSeverity] = useState<IncidentSeverity>('low');
   const [description, setDescription] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -25,10 +25,13 @@ export const IncidentReportModal: React.FC<IncidentReportModalProps> = ({
 
   if (!isOpen || !booking) return null;
 
+  const charCount = description.trim().length;
+  const isDescValid = charCount >= 10;
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!description || description.trim().length < 5) {
-      setErrorMsg('Mandatory: Please provide a description of at least 5 characters.');
+    if (!description || description.trim().length < 10) {
+      setErrorMsg('Mandatory Rule: Incident description must be at least 10 characters.');
       return;
     }
 
@@ -86,11 +89,12 @@ export const IncidentReportModal: React.FC<IncidentReportModalProps> = ({
             <label className="block font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">
               Incident Category
             </label>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               {[
-                { id: 'delay' as IncidentType, label: 'Schedule Delay', icon: Clock },
-                { id: 'damage' as IncidentType, label: 'Equipment Damage', icon: Flame },
-                { id: 'incident' as IncidentType, label: 'Facility Anomaly', icon: AlertCircle },
+                { id: 'damage' as IncidentType, label: 'Damage', desc: 'Hardware defect', icon: Flame },
+                { id: 'delay' as IncidentType, label: 'Delay', desc: 'Schedule overrun', icon: Clock },
+                { id: 'safety' as IncidentType, label: 'Safety', desc: 'Protocol hazard', icon: ShieldAlert },
+                { id: 'conflict' as IncidentType, label: 'Conflict', desc: 'Schedule dispute', icon: Users },
               ].map((cat) => {
                 const Icon = cat.icon;
                 return (
@@ -105,7 +109,8 @@ export const IncidentReportModal: React.FC<IncidentReportModalProps> = ({
                     }`}
                   >
                     <Icon className="h-4 w-4" />
-                    <span>{cat.label}</span>
+                    <span className="font-bold">{cat.label}</span>
+                    <span className="text-[10px] font-normal opacity-75">{cat.desc}</span>
                   </button>
                 );
               })}
@@ -141,9 +146,14 @@ export const IncidentReportModal: React.FC<IncidentReportModalProps> = ({
 
           {/* Description */}
           <div>
-            <label className="block font-semibold text-zinc-700 dark:text-zinc-300 mb-1">
-              Descriptive Summary
-            </label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="font-semibold text-zinc-700 dark:text-zinc-300">
+                Descriptive Summary (min 10 chars)
+              </label>
+              <span className={`text-[11px] font-mono ${isDescValid ? 'text-emerald-600 dark:text-emerald-400 font-semibold' : 'text-zinc-500'}`}>
+                {charCount} / 10 min
+              </span>
+            </div>
             <textarea
               rows={3}
               value={description}
@@ -164,8 +174,8 @@ export const IncidentReportModal: React.FC<IncidentReportModalProps> = ({
             </button>
             <button
               type="submit"
-              disabled={submitting}
-              className="flex items-center gap-1.5 px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-semibold rounded-xl shadow-xs transition-colors cursor-pointer"
+              disabled={submitting || !isDescValid}
+              className="flex items-center gap-1.5 px-4 py-2 bg-rose-600 hover:bg-rose-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold rounded-xl shadow-xs transition-colors cursor-pointer"
             >
               <Flag className="h-4 w-4" />
               <span>{submitting ? 'Logging...' : 'Submit Incident Report'}</span>

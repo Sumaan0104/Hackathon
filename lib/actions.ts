@@ -1,7 +1,7 @@
 'use server';
 
 import { campusStore } from './store';
-import { Resource, UserRole, Booking, IncidentReport, AuditLogEntry, Profile, InspectionChecklist, IncidentSeverity, IncidentType } from './types';
+import { Resource, UserRole, Booking, IncidentReport, AuditLogEntry, Profile, InspectionChecklist, IncidentSeverity, IncidentType, ConditionRating } from './types';
 import { revalidatePath } from 'next/cache';
 import { createClient as createServerSupabase } from './supabase/server';
 import { 
@@ -217,6 +217,8 @@ export async function checkInAction(
 
   revalidatePath('/');
   revalidatePath('/bookings');
+  revalidatePath(`/bookings/${bookingId}`);
+  revalidatePath('/owner/requests');
   revalidatePath('/audit');
   return { success: true, booking: updatedBooking };
 }
@@ -225,28 +227,42 @@ export async function returnAction(
   profileIdOrEmail: string, 
   bookingId: string, 
   conditionNotes: string,
+  conditionRating: ConditionRating,
   checklist?: InspectionChecklist
 ) {
   const actor = await getProfileServer(profileIdOrEmail);
-  const updatedBooking = campusStore.returnResource(actor, bookingId, conditionNotes, checklist);
+  const result = campusStore.returnResource(actor, bookingId, conditionNotes, conditionRating, checklist);
 
   const isConnected = await isSupabaseDbConnected();
   if (isConnected) {
     await updateSupabaseBooking(bookingId, {
       status: 'completed',
-      return_condition_notes: updatedBooking.return_condition_notes,
-      return_checklist: updatedBooking.return_checklist,
-      returned_at: updatedBooking.returned_at,
-      updated_at: updatedBooking.updated_at,
+      return_condition_notes: result.booking.return_condition_notes,
+      return_checklist: result.booking.return_checklist,
+      returned_at: result.booking.returned_at,
+      updated_at: result.booking.updated_at,
     });
-    const latestAudit = campusStore.getAuditLogs()[0];
-    if (latestAudit) await insertSupabaseAuditLog(latestAudit);
+    // Insert RETURNED and LATE_RETURN (if late)
+    const logs = campusStore.getAuditLogs();
+    if (result.isLate && logs.length >= 2) {
+      await insertSupabaseAuditLog(logs[1]);
+      await insertSupabaseAuditLog(logs[0]);
+    } else if (logs[0]) {
+      await insertSupabaseAuditLog(logs[0]);
+    }
   }
 
   revalidatePath('/');
   revalidatePath('/bookings');
+  revalidatePath(`/bookings/${bookingId}`);
+  revalidatePath('/owner/requests');
   revalidatePath('/audit');
-  return { success: true, booking: updatedBooking };
+  return { 
+    success: true, 
+    booking: result.booking, 
+    isLate: result.isLate, 
+    lateMinutes: result.lateMinutes 
+  };
 }
 
 export async function reportIncidentAction(
@@ -268,6 +284,29 @@ export async function reportIncidentAction(
 
   revalidatePath('/');
   revalidatePath('/bookings');
+  revalidatePath(`/bookings/${bookingId}`);
+  revalidatePath('/incidents');
+  revalidatePath('/audit');
+  return { success: true, incident: report };
+}
+
+export async function resolveIncidentAction(
+  profileIdOrEmail: string,
+  incidentId: string,
+  resolutionNotes: string
+) {
+  const actor = await getProfileServer(profileIdOrEmail);
+  const report = campusStore.resolveIncident(actor, incidentId, resolutionNotes);
+
+  const isConnected = await isSupabaseDbConnected();
+  if (isConnected) {
+    const latestAudit = campusStore.getAuditLogs()[0];
+    if (latestAudit) await insertSupabaseAuditLog(latestAudit);
+  }
+
+  revalidatePath('/');
+  revalidatePath('/bookings');
+  revalidatePath(`/bookings/${report.booking_id}`);
   revalidatePath('/incidents');
   revalidatePath('/audit');
   return { success: true, incident: report };
@@ -463,4 +502,204 @@ export async function markAllNotificationsReadAction(profileIdOrEmail: string) {
   revalidatePath('/');
   revalidatePath('/bookings');
   return { success: ok };
+}
+
+export interface BookingTimelineEvent {
+  id: string;
+  timestamp: string;
+  action: string;
+  actorName: string;
+  actorRole: string;
+  title: string;
+  description: string;
+  type: 'milestone' | 'inspection' | 'incident' | 'warning' | 'audit';
+  badgeColor: string;
+  details?: Record<string, any>;
+}
+
+export async function getBookingDetailAction(profileIdOrEmail: string, bookingId: string) {
+  const actor = await getProfileServer(profileIdOrEmail);
+
+  // Sync from Supabase Postgres if connected
+  const isConnected = await isSupabaseDbConnected();
+  if (isConnected) {
+    try {
+      const [supaProfiles, supaResources, supaBookings] = await Promise.all([
+        fetchSupabaseProfiles(),
+        fetchSupabaseResources(),
+        fetchSupabaseBookings(),
+      ]);
+      if (supaProfiles && supaResources && supaBookings) {
+        campusStore.syncFromSupabase(supaProfiles, supaResources, supaBookings);
+      }
+    } catch {}
+  }
+
+  const booking = campusStore.getBooking(bookingId);
+  if (!booking) {
+    return { notFound: true, bookingId };
+  }
+
+  const resource = campusStore.getResource(booking.resource_id) || booking.resource;
+  const isBorrower = booking.user_id === actor.id || booking.user_email === actor.email;
+  const isOwner = resource ? (resource.owner_id === actor.id || resource.owner_name === actor.full_name) : false;
+  const isPrivileged = ['manager', 'admin'].includes(actor.role);
+
+  // Requirement 4: "visible to both the user and the resource owner only" (plus admin)
+  if (!isBorrower && !isOwner && !isPrivileged) {
+    return {
+      unauthorized: true,
+      role: actor.role,
+      actorName: actor.full_name,
+      bookingId,
+    };
+  }
+
+  const requester = campusStore.getProfile(booking.user_id) || campusStore.getProfileByEmail(booking.user_email || '');
+  const incidents = campusStore.getIncidentsByBooking(booking.id);
+  const auditLogs = campusStore.getAuditLogsByBooking(booking.id);
+
+  // Assemble comprehensive timeline
+  const timeline: BookingTimelineEvent[] = [];
+
+  // 1. Booking Creation
+  timeline.push({
+    id: `tl-created-${booking.id}`,
+    timestamp: booking.created_at,
+    action: 'BOOKING_REQUESTED',
+    actorName: booking.user_name || 'Borrower',
+    actorRole: 'user',
+    title: 'Booking Requested',
+    description: `Slot requested for ${booking.duration_hours.toFixed(1)}h with purpose: "${booking.purpose}"`,
+    type: 'milestone',
+    badgeColor: 'blue',
+  });
+
+  // 2. Decision Milestone (if reviewed)
+  if (booking.status_updated_at && booking.status !== 'pending') {
+    timeline.push({
+      id: `tl-decision-${booking.id}`,
+      timestamp: booking.status_updated_at,
+      action: booking.status === 'approved' ? 'BOOKING_APPROVED' : booking.status === 'rejected' ? 'BOOKING_REJECTED' : 'BOOKING_WAITLISTED',
+      actorName: booking.status_updated_by || resource?.owner_name || 'Custodian',
+      actorRole: 'owner',
+      title: `Booking ${booking.status.toUpperCase()}`,
+      description: booking.status_reason || 'Decision recorded by custodian.',
+      type: booking.status === 'approved' ? 'milestone' : booking.status === 'waitlisted' ? 'warning' : 'audit',
+      badgeColor: booking.status === 'approved' ? 'emerald' : booking.status === 'waitlisted' ? 'amber' : 'rose',
+    });
+  }
+
+  // 3. Check-In Milestone
+  if (booking.checked_in_at) {
+    timeline.push({
+      id: `tl-checkin-${booking.id}`,
+      timestamp: booking.checked_in_at,
+      action: 'CHECKED_IN',
+      actorName: booking.user_name || 'Borrower',
+      actorRole: 'user',
+      title: 'Arrival Check-In Completed',
+      description: `Physical condition inspection: "${booking.checkin_condition_notes || 'Clean & verified'}"`,
+      type: 'inspection',
+      badgeColor: 'emerald',
+      details: { checklist: booking.checkin_checklist },
+    });
+  }
+
+  // 4. Incidents
+  incidents.forEach((inc) => {
+    timeline.push({
+      id: `tl-inc-${inc.id}`,
+      timestamp: inc.created_at,
+      action: 'INCIDENT_REPORTED',
+      actorName: inc.reporter_name || 'Reporter',
+      actorRole: inc.reporter_role || 'user',
+      title: `Incident Logged: ${inc.type.toUpperCase()}`,
+      description: `${inc.severity.toUpperCase()} severity: "${inc.description}" (Policy: No automated penalties)`,
+      type: 'incident',
+      badgeColor: inc.severity === 'high' ? 'rose' : 'amber',
+      details: { incidentId: inc.id, type: inc.type, severity: inc.severity },
+    });
+
+    if (inc.resolved_at) {
+      timeline.push({
+        id: `tl-inc-res-${inc.id}`,
+        timestamp: inc.resolved_at,
+        action: 'INCIDENT_RESOLVED',
+        actorName: inc.resolved_by_name || 'Facility Custodian',
+        actorRole: 'owner',
+        title: `Incident Resolved: ${inc.type.toUpperCase()}`,
+        description: `Custodian Resolution Note: "${inc.resolution_notes || 'Resolved without penalty'}"`,
+        type: 'milestone',
+        badgeColor: 'emerald',
+        details: { incidentId: inc.id },
+      });
+    }
+  });
+
+  // 5. Return Milestone
+  if (booking.returned_at) {
+    timeline.push({
+      id: `tl-return-${booking.id}`,
+      timestamp: booking.returned_at,
+      action: 'RETURNED',
+      actorName: booking.user_name || 'Borrower',
+      actorRole: 'user',
+      title: 'Resource Returned & Completed',
+      description: `Departure inspection: "${booking.return_condition_notes || 'Good'}" | Condition Rating: ${booking.return_condition_rating || 'good'}`,
+      type: 'milestone',
+      badgeColor: 'blue',
+      details: { checklist: booking.return_checklist, rating: booking.return_condition_rating },
+    });
+
+    if (booking.is_late) {
+      timeline.push({
+        id: `tl-late-${booking.id}`,
+        timestamp: booking.returned_at,
+        action: 'LATE_RETURN',
+        actorName: 'System Monitor',
+        actorRole: 'admin',
+        title: `Late Return Flagged (+${booking.late_minutes}m delay)`,
+        description: `Resource returned ${booking.late_minutes} minutes past scheduled session end time.`,
+        type: 'warning',
+        badgeColor: 'rose',
+        details: { delayMinutes: booking.late_minutes },
+      });
+    }
+  }
+
+  // Merge extra audit logs not already mapped
+  auditLogs.forEach((log) => {
+    const isMapped = timeline.some((t) => t.action === log.action && Math.abs(new Date(t.timestamp).getTime() - new Date(log.created_at).getTime()) < 5000);
+    if (!isMapped) {
+      timeline.push({
+        id: `tl-audit-${log.id}`,
+        timestamp: log.created_at,
+        action: log.action,
+        actorName: log.actor_name,
+        actorRole: log.actor_role,
+        title: log.action.replace(/_/g, ' '),
+        description: log.details?.written_reason || log.details?.description || JSON.stringify(log.details || {}),
+        type: 'audit',
+        badgeColor: 'zinc',
+        details: log.details,
+      });
+    }
+  });
+
+  // Sort timeline chronologically (oldest first)
+  timeline.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+
+  return {
+    unauthorized: false,
+    booking,
+    resource,
+    requester,
+    incidents,
+    timeline,
+    isBorrower,
+    isOwner,
+    isPrivileged,
+    currentActor: actor,
+  };
 }
