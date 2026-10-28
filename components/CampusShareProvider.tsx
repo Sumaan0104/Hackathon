@@ -8,7 +8,9 @@ import {
   IncidentReport, 
   AuditLogEntry, 
   UserRole,
-  IncidentType
+  IncidentType,
+  IncidentSeverity,
+  InspectionChecklist
 } from '@/lib/types';
 import { 
   fetchAllData, 
@@ -18,7 +20,8 @@ import {
   returnAction, 
   reportIncidentAction, 
   createResourceAction,
-  getWaitlistQueueAction
+  getWaitlistQueueAction,
+  resetDemoDataAction
 } from '@/lib/actions';
 import { Navbar } from './Navbar';
 import { BookingRequestModal } from './BookingRequestModal';
@@ -28,6 +31,7 @@ import { CheckInModal } from './CheckInModal';
 import { ReturnModal } from './ReturnModal';
 import { IncidentReportModal } from './IncidentReportModal';
 import { CreateResourceModal } from './CreateResourceModal';
+import { ArchitectureModal } from './ArchitectureModal';
 
 interface CampusShareContextType {
   currentProfile: Profile;
@@ -46,6 +50,8 @@ interface CampusShareContextType {
   openReturnModal: (booking: Booking) => void;
   openIncidentModal: (booking: Booking) => void;
   openCreateResourceModal: () => void;
+  openArchitectureModal: () => void;
+  resetDemoData: () => Promise<void>;
 }
 
 const CampusShareContext = createContext<CampusShareContextType | null>(null);
@@ -87,6 +93,7 @@ export const CampusShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
   const [isReturnOpen, setIsReturnOpen] = useState(false);
   const [isIncidentOpen, setIsIncidentOpen] = useState(false);
   const [isCreateResourceOpen, setIsCreateResourceOpen] = useState(false);
+  const [isArchitectureOpen, setIsArchitectureOpen] = useState(false);
 
   // Toast feedback state
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'info' | 'error' } | null>(null);
@@ -121,7 +128,7 @@ export const CampusShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
   const switchProfile = async (profileId: string) => {
     await loadData(profileId);
     const target = profiles.find((p) => p.id === profileId);
-    showToast(`Switched active persona to ${target?.full_name || profileId} (${target?.role || 'user'})`, 'info');
+    showToast(`Persona active: ${target?.full_name || profileId} (${target?.role || 'user'})`, 'info');
   };
 
   // Handler for booking request
@@ -134,9 +141,9 @@ export const CampusShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
     const res = await requestBookingAction(currentProfile.id, resourceId, startTime, endTime, purpose);
     await loadData(currentProfile.id);
     if (res.waitlisted) {
-      showToast('Time clash detected: You have been placed on the Fair-Access Waitlist!', 'info');
+      showToast(`Schedule clash detected: Placed on Fair-Access Waitlist (#1 priority queue)!`, 'info');
     } else {
-      showToast('Booking request submitted! Awaiting owner review.', 'success');
+      showToast('Booking request submitted! Awaiting facility owner review.', 'success');
     }
   };
 
@@ -148,28 +155,33 @@ export const CampusShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
   ) => {
     await updateBookingDecisionAction(currentProfile.id, bookingId, decision, writtenReason);
     await loadData(currentProfile.id);
-    showToast(`Booking ${decision.toUpperCase()} with written justification recorded.`, 'success');
+    showToast(`Decision recorded: ${decision.toUpperCase()} with mandatory written justification.`, 'success');
   };
 
-  // Handler for check-in
-  const handleCheckInSubmit = async (bookingId: string, notes: string) => {
-    await checkInAction(currentProfile.id, bookingId, notes);
+  // Handler for check-in with checklist
+  const handleCheckInSubmit = async (bookingId: string, notes: string, checklist: InspectionChecklist) => {
+    await checkInAction(currentProfile.id, bookingId, notes, checklist);
     await loadData(currentProfile.id);
-    showToast('Check-in confirmed with condition notes logged.', 'success');
+    showToast('Arrival check-in confirmed & physical inspection logged to audit trail.', 'success');
   };
 
-  // Handler for return
-  const handleReturnSubmit = async (bookingId: string, notes: string) => {
-    await returnAction(currentProfile.id, bookingId, notes);
+  // Handler for return with checklist
+  const handleReturnSubmit = async (bookingId: string, notes: string, checklist: InspectionChecklist) => {
+    await returnAction(currentProfile.id, bookingId, notes, checklist);
     await loadData(currentProfile.id);
-    showToast('Return recorded and booking completed successfully!', 'success');
+    showToast('Departure verified: Equipment returned in good standing!', 'success');
   };
 
   // Handler for incident report
-  const handleIncidentSubmit = async (bookingId: string, type: IncidentType, description: string) => {
-    await reportIncidentAction(currentProfile.id, bookingId, type, description);
+  const handleIncidentSubmit = async (
+    bookingId: string, 
+    type: IncidentType, 
+    severity: IncidentSeverity, 
+    description: string
+  ) => {
+    await reportIncidentAction(currentProfile.id, bookingId, type, severity, description);
     await loadData(currentProfile.id);
-    showToast(`Incident report logged. No automated penalty applied.`, 'info');
+    showToast(`Incident report recorded. No automated penalty applied under campus policy.`, 'info');
   };
 
   // Handler for resource creation
@@ -177,6 +189,13 @@ export const CampusShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
     await createResourceAction(currentProfile.id, data);
     await loadData(currentProfile.id);
     showToast(`Resource "${data.name}" listed successfully.`, 'success');
+  };
+
+  // Reset demo fixtures
+  const handleResetDemoData = async () => {
+    await resetDemoDataAction(currentProfile.id);
+    await loadData(currentProfile.id);
+    showToast('Demonstration data & fixtures reset to factory baseline.', 'info');
   };
 
   // Modal openers
@@ -216,6 +235,10 @@ export const CampusShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
     setIsCreateResourceOpen(true);
   };
 
+  const openArchitectureModal = () => {
+    setIsArchitectureOpen(true);
+  };
+
   return (
     <CampusShareContext.Provider
       value={{
@@ -235,6 +258,8 @@ export const CampusShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
         openReturnModal,
         openIncidentModal,
         openCreateResourceModal,
+        openArchitectureModal,
+        resetDemoData: handleResetDemoData,
       }}
     >
       <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 flex flex-col">
@@ -244,6 +269,8 @@ export const CampusShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
           weeklyHours={weeklyHours}
           onSwitchProfile={switchProfile}
           onOpenCreateResource={openCreateResourceModal}
+          onOpenArchitecture={openArchitectureModal}
+          onResetDemoData={['admin', 'manager'].includes(currentProfile.role) ? handleResetDemoData : undefined}
         />
 
         {/* Global Toast */}
@@ -269,8 +296,16 @@ export const CampusShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
         </main>
 
         <footer className="border-t border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 py-6 text-center text-xs text-zinc-500">
-          <div className="max-w-7xl mx-auto px-4">
-            CampusShare — Academic resource sharing platform for college labs, equipment & spaces. All decisions logged to <code className="text-indigo-600 dark:text-indigo-400 font-mono">audit_log</code>.
+          <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-3">
+            <div>
+              CampusShare — Platform for sharing underused labs, equipment & spaces. All decisions logged to <code className="text-indigo-600 dark:text-indigo-400 font-mono">audit_log</code>.
+            </div>
+            <button
+              onClick={openArchitectureModal}
+              className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer"
+            >
+              Architecture & Security Blueprint ↗
+            </button>
           </div>
         </footer>
 
@@ -279,6 +314,7 @@ export const CampusShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
           resource={selectedResource}
           currentProfile={currentProfile}
           weeklyHours={weeklyHours}
+          existingBookings={bookings}
           isOpen={isBookingOpen}
           onClose={() => setIsBookingOpen(false)}
           onSubmit={handleBookingSubmit}
@@ -324,6 +360,11 @@ export const CampusShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
           isOpen={isCreateResourceOpen}
           onClose={() => setIsCreateResourceOpen(false)}
           onSubmitCreate={handleCreateResourceSubmit}
+        />
+
+        <ArchitectureModal
+          isOpen={isArchitectureOpen}
+          onClose={() => setIsArchitectureOpen(false)}
         />
       </div>
     </CampusShareContext.Provider>

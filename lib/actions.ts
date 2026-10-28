@@ -1,17 +1,13 @@
 'use server';
 
 import { campusStore } from './store';
-import { Resource, UserRole, Booking, IncidentReport, AuditLogEntry, Profile } from './types';
+import { Resource, UserRole, Booking, IncidentReport, AuditLogEntry, Profile, InspectionChecklist, IncidentSeverity, IncidentType } from './types';
 import { revalidatePath } from 'next/cache';
 
-/**
- * Server-side profile resolution.
- * All role checks happen strictly on the server!
- */
 export async function getProfileServer(profileId: string): Promise<Profile> {
   const profile = campusStore.getProfile(profileId);
   if (!profile) {
-    throw new Error('Profile not found on server.');
+    throw new Error('Server Authentication: Profile record not found.');
   }
   return profile;
 }
@@ -24,7 +20,7 @@ export async function fetchAllData(profileId: string = 'user-1') {
   const auditLogs = campusStore.getAuditLogs();
   const profiles = campusStore.getAllProfiles();
 
-  // Calculate current user's weekly booked hours
+  // Weekly hours booked calculation
   const weeklyHours = campusStore.getUserWeeklyBookedHours(currentProfile.id, new Date().toISOString());
 
   return {
@@ -49,7 +45,13 @@ export async function requestBookingAction(
   const result = campusStore.requestBooking(actor, resourceId, startTime, endTime, purpose);
   revalidatePath('/');
   revalidatePath('/bookings');
-  return { success: true, booking: result.booking, waitlisted: result.waitlisted, warning: result.warning };
+  return { 
+    success: true, 
+    booking: result.booking, 
+    waitlisted: result.waitlisted, 
+    warning: result.warning,
+    clashingWith: result.clashingWith
+  };
 }
 
 export async function updateBookingDecisionAction(
@@ -59,7 +61,6 @@ export async function updateBookingDecisionAction(
   writtenReason: string
 ) {
   const actor = await getProfileServer(profileId);
-  // Server-side check
   const updatedBooking = campusStore.updateBookingDecision(actor, bookingId, decision, writtenReason);
   revalidatePath('/');
   revalidatePath('/bookings');
@@ -67,18 +68,28 @@ export async function updateBookingDecisionAction(
   return { success: true, booking: updatedBooking };
 }
 
-export async function checkInAction(profileId: string, bookingId: string, conditionNotes: string) {
+export async function checkInAction(
+  profileId: string, 
+  bookingId: string, 
+  conditionNotes: string,
+  checklist?: InspectionChecklist
+) {
   const actor = await getProfileServer(profileId);
-  const updatedBooking = campusStore.checkIn(actor, bookingId, conditionNotes);
+  const updatedBooking = campusStore.checkIn(actor, bookingId, conditionNotes, checklist);
   revalidatePath('/');
   revalidatePath('/bookings');
   revalidatePath('/audit');
   return { success: true, booking: updatedBooking };
 }
 
-export async function returnAction(profileId: string, bookingId: string, conditionNotes: string) {
+export async function returnAction(
+  profileId: string, 
+  bookingId: string, 
+  conditionNotes: string,
+  checklist?: InspectionChecklist
+) {
   const actor = await getProfileServer(profileId);
-  const updatedBooking = campusStore.returnResource(actor, bookingId, conditionNotes);
+  const updatedBooking = campusStore.returnResource(actor, bookingId, conditionNotes, checklist);
   revalidatePath('/');
   revalidatePath('/bookings');
   revalidatePath('/audit');
@@ -88,11 +99,12 @@ export async function returnAction(profileId: string, bookingId: string, conditi
 export async function reportIncidentAction(
   profileId: string,
   bookingId: string,
-  type: 'delay' | 'damage' | 'incident',
+  type: IncidentType,
+  severity: IncidentSeverity,
   description: string
 ) {
   const actor = await getProfileServer(profileId);
-  const report = campusStore.reportIncident(actor, bookingId, type, description);
+  const report = campusStore.reportIncident(actor, bookingId, type, severity, description);
   revalidatePath('/');
   revalidatePath('/bookings');
   revalidatePath('/incidents');
@@ -110,6 +122,9 @@ export async function createResourceAction(
     capacity: number;
     eligibility_requirements: string;
     is_active: boolean;
+    specs?: string[];
+    available_hours?: string;
+    safety_tier?: number;
   }
 ) {
   const actor = await getProfileServer(profileId);
@@ -122,4 +137,17 @@ export async function createResourceAction(
 
 export async function getWaitlistQueueAction(resourceId: string) {
   return campusStore.getWaitlistByLeastRecentUse(resourceId);
+}
+
+export async function resetDemoDataAction(profileId: string) {
+  const actor = await getProfileServer(profileId);
+  if (!['admin', 'manager'].includes(actor.role)) {
+    throw new Error('Only admins or managers can reset sample demonstration fixtures.');
+  }
+  campusStore.seed();
+  revalidatePath('/');
+  revalidatePath('/bookings');
+  revalidatePath('/incidents');
+  revalidatePath('/audit');
+  return { success: true };
 }

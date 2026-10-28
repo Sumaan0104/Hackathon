@@ -9,12 +9,12 @@ import {
   CalendarCheck, 
   AlertTriangle, 
   ShieldCheck, 
-  UserCheck, 
   Clock, 
   Menu, 
   X,
   PlusCircle,
-  HelpCircle
+  Cpu,
+  RotateCcw
 } from 'lucide-react';
 import { Profile, UserRole } from '@/lib/types';
 
@@ -24,6 +24,8 @@ interface NavbarProps {
   weeklyHours: number;
   onSwitchProfile: (profileId: string) => void;
   onOpenCreateResource?: () => void;
+  onOpenArchitecture?: () => void;
+  onResetDemoData?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -32,16 +34,18 @@ export const Navbar: React.FC<NavbarProps> = ({
   weeklyHours,
   onSwitchProfile,
   onOpenCreateResource,
+  onOpenArchitecture,
+  onResetDemoData,
 }) => {
   const pathname = usePathname();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [roleDropdownOpen, setRoleDropdownOpen] = useState(false);
 
   const navLinks = [
-    { href: '/', label: 'Resources', icon: Layers },
+    { href: '/', label: 'Explore Resources', icon: Layers },
     { href: '/bookings', label: 'Bookings & Reviews', icon: CalendarCheck },
-    { href: '/incidents', label: 'Incidents', icon: AlertTriangle },
-    { href: '/audit', label: 'Audit Log', icon: ShieldCheck },
+    { href: '/incidents', label: 'Incident Desk', icon: AlertTriangle },
+    { href: '/audit', label: 'Audit Trail', icon: ShieldCheck },
   ];
 
   const getRoleBadgeColor = (role: UserRole) => {
@@ -94,7 +98,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <Link
                   key={link.href}
                   href={link.href}
-                  className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold transition-colors ${
                     isActive
                       ? 'bg-zinc-100 text-zinc-900 dark:bg-zinc-800 dark:text-white'
                       : 'text-zinc-600 hover:text-zinc-900 hover:bg-zinc-50 dark:text-zinc-400 dark:hover:text-white dark:hover:bg-zinc-800/60'
@@ -108,10 +112,23 @@ export const Navbar: React.FC<NavbarProps> = ({
           </nav>
 
           {/* User Status, Role Switcher & Action */}
-          <div className="hidden lg:flex items-center gap-3">
+          <div className="hidden lg:flex items-center gap-2.5">
+            
+            {/* Architecture Specs Button */}
+            {onOpenArchitecture && (
+              <button
+                onClick={onOpenArchitecture}
+                title="View Server Architecture & Governance Rules"
+                className="flex items-center gap-1.5 px-2.5 py-1.5 text-zinc-600 hover:text-indigo-600 dark:text-zinc-400 dark:hover:text-indigo-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg text-xs font-medium transition-colors cursor-pointer"
+              >
+                <Cpu className="h-4 w-4" />
+                <span>Architecture</span>
+              </button>
+            )}
+
             {/* Weekly Cap Indicator */}
             <div 
-              title={`Weekly cap: ${weeklyHours.toFixed(1)}h booked out of ${currentProfile.weekly_hours_cap}h allowed`}
+              title={`Weekly quota: ${weeklyHours.toFixed(1)}h booked out of ${currentProfile.weekly_hours_cap}h allowed`}
               className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${
                 isCapWarning 
                   ? 'bg-amber-50 text-amber-800 border-amber-300 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-700' 
@@ -120,7 +137,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             >
               <Clock className="h-3.5 w-3.5 text-zinc-400" />
               <span>
-                Cap: <strong>{weeklyHours.toFixed(1)}h</strong> / {currentProfile.weekly_hours_cap}h
+                Quota: <strong>{weeklyHours.toFixed(1)}h</strong> / {currentProfile.weekly_hours_cap}h
               </span>
             </div>
 
@@ -135,7 +152,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               </button>
             )}
 
-            {/* Active Persona / Role Switcher dropdown */}
+            {/* Persona Switcher Dropdown */}
             <div className="relative">
               <button
                 onClick={() => setRoleDropdownOpen(!roleDropdownOpen)}
@@ -158,8 +175,20 @@ export const Navbar: React.FC<NavbarProps> = ({
 
               {roleDropdownOpen && (
                 <div className="absolute right-0 mt-2 w-72 rounded-xl bg-white dark:bg-zinc-900 shadow-xl border border-zinc-200 dark:border-zinc-800 p-2 z-50">
-                  <div className="px-2 py-1.5 border-b border-zinc-100 dark:border-zinc-800 text-[11px] font-semibold text-zinc-400 uppercase tracking-wider">
-                    Switch Test Persona & Role
+                  <div className="px-2 py-1.5 border-b border-zinc-100 dark:border-zinc-800 text-[11px] font-semibold text-zinc-400 uppercase tracking-wider flex items-center justify-between">
+                    <span>Switch Test Persona & Role</span>
+                    {onResetDemoData && (
+                      <button
+                        onClick={() => {
+                          onResetDemoData();
+                          setRoleDropdownOpen(false);
+                        }}
+                        title="Reset sample fixtures"
+                        className="text-[10px] text-zinc-500 hover:text-indigo-600 flex items-center gap-1 lowercase"
+                      >
+                        <RotateCcw className="h-3 w-3" /> reset
+                      </button>
+                    )}
                   </div>
                   <div className="space-y-1 mt-1">
                     {profiles.map((p) => (
@@ -227,6 +256,19 @@ export const Navbar: React.FC<NavbarProps> = ({
               );
             })}
           </div>
+
+          {onOpenArchitecture && (
+            <button
+              onClick={() => {
+                onOpenArchitecture();
+                setMobileMenuOpen(false);
+              }}
+              className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+            >
+              <Cpu className="h-4 w-4 text-indigo-500" />
+              <span>System Architecture & Governance Blueprint</span>
+            </button>
+          )}
 
           <div className="pt-3 border-t border-zinc-100 dark:border-zinc-800">
             <div className="text-xs font-medium text-zinc-500 mb-2">

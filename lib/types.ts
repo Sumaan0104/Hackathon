@@ -12,6 +12,8 @@ export type BookingStatus =
   | 'cancelled';
 
 export type IncidentType = 'delay' | 'damage' | 'incident';
+export type IncidentSeverity = 'low' | 'medium' | 'high';
+export type IncidentResolutionStatus = 'investigating' | 'resolved' | 'acknowledged';
 
 export interface Profile {
   id: string;
@@ -20,6 +22,7 @@ export interface Profile {
   department: string;
   role: UserRole;
   weekly_hours_cap: number; // default 6h
+  avatar_url?: string;
   created_at: string;
 }
 
@@ -36,7 +39,18 @@ export interface Resource {
   eligibility_requirements: string;
   is_active: boolean;
   image_url?: string;
+  specs?: string[];
+  safety_tier?: number;
+  available_hours?: string;
+  utilization_rate?: number; // e.g. 78%
   created_at: string;
+}
+
+export interface InspectionChecklist {
+  physicalChecked: boolean;
+  cleanlinessVerified: boolean;
+  safetySecured: boolean;
+  accessoriesPresent: boolean;
 }
 
 export interface Booking {
@@ -51,13 +65,16 @@ export interface Booking {
   duration_hours: number;
   purpose: string;
   status: BookingStatus;
-  status_reason?: string; // Required for approved, rejected, waitlisted
+  status_reason?: string; // Mandatory for approved, rejected, waitlisted
   status_updated_at?: string;
   status_updated_by?: string;
   checkin_condition_notes?: string;
+  checkin_checklist?: InspectionChecklist;
   checked_in_at?: string;
   return_condition_notes?: string;
+  return_checklist?: InspectionChecklist;
   returned_at?: string;
+  clash_detected?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -70,7 +87,10 @@ export interface IncidentReport {
   reporter_name?: string;
   reporter_role?: UserRole;
   type: IncidentType;
+  severity: IncidentSeverity;
+  status: IncidentResolutionStatus;
   description: string;
+  resolution_notes?: string;
   created_at: string;
 }
 

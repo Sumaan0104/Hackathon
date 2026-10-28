@@ -1,14 +1,14 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Booking, IncidentType } from '@/lib/types';
-import { X, AlertTriangle, ShieldCheck, Flag } from 'lucide-react';
+import { Booking, IncidentType, IncidentSeverity } from '@/lib/types';
+import { X, AlertTriangle, ShieldCheck, Flag, Flame, Clock, AlertCircle } from 'lucide-react';
 
 interface IncidentReportModalProps {
   booking: Booking | null;
   isOpen: boolean;
   onClose: () => void;
-  onSubmitIncident: (bookingId: string, type: IncidentType, description: string) => Promise<void>;
+  onSubmitIncident: (bookingId: string, type: IncidentType, severity: IncidentSeverity, description: string) => Promise<void>;
 }
 
 export const IncidentReportModal: React.FC<IncidentReportModalProps> = ({
@@ -18,6 +18,7 @@ export const IncidentReportModal: React.FC<IncidentReportModalProps> = ({
   onSubmitIncident,
 }) => {
   const [type, setType] = useState<IncidentType>('delay');
+  const [severity, setSeverity] = useState<IncidentSeverity>('low');
   const [description, setDescription] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -27,13 +28,13 @@ export const IncidentReportModal: React.FC<IncidentReportModalProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!description || description.trim().length < 5) {
-      setErrorMsg('Please provide a descriptive report of at least 5 characters.');
+      setErrorMsg('Mandatory: Please provide a description of at least 5 characters.');
       return;
     }
 
     try {
       setSubmitting(true);
-      await onSubmitIncident(booking.id, type, description.trim());
+      await onSubmitIncident(booking.id, type, severity, description.trim());
       onClose();
     } catch (err: any) {
       setErrorMsg(err.message || 'Failed to submit incident report.');
@@ -44,13 +45,15 @@ export const IncidentReportModal: React.FC<IncidentReportModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150">
-      <div className="w-full max-w-md rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-2xl overflow-hidden flex flex-col">
+      <div className="w-full max-w-lg rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-2xl overflow-hidden flex flex-col text-xs">
+        
+        {/* Header */}
         <div className="flex items-center justify-between p-5 border-b border-zinc-100 dark:border-zinc-800">
           <div>
-            <span className="text-[11px] font-bold uppercase tracking-wider text-rose-600 dark:text-rose-400">
-              Report Incident / Issue
+            <span className="text-[10px] font-bold uppercase tracking-wider text-rose-600 dark:text-rose-400">
+              Operational Reporting Log
             </span>
-            <h2 className="text-base font-bold text-zinc-900 dark:text-white">
+            <h2 className="text-base font-bold text-zinc-900 dark:text-white mt-0.5 line-clamp-1">
               {booking.resource?.name}
             </h2>
           </div>
@@ -67,68 +70,105 @@ export const IncidentReportModal: React.FC<IncidentReportModalProps> = ({
             </div>
           )}
 
-          {/* Rule Reminder */}
-          <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 text-xs text-amber-800 dark:text-amber-300 flex items-start gap-2">
-            <ShieldCheck className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+          {/* Governance Guarantee Banner */}
+          <div className="p-3.5 rounded-xl bg-indigo-50/70 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-900 text-xs text-indigo-900 dark:text-indigo-200 flex items-start gap-2.5">
+            <ShieldCheck className="h-4 w-4 text-indigo-600 shrink-0 mt-0.5" />
             <div>
-              <strong>Campus Policy: No automated penalties.</strong>
-              <div className="text-[11px] mt-0.5">
-                All reports are reviewed by resource owners and lab managers to ensure fair and contextual resolution.
+              <strong>CampusShare Rule: Strict &ldquo;No Automated Penalties&rdquo; Policy</strong>
+              <div className="text-[11px] text-indigo-800 dark:text-indigo-300 mt-0.5">
+                All reports are recorded to maintain transparency and maintenance queues. No automated fines or account locks will be imposed. Owners and facility managers make all contextual decisions.
               </div>
             </div>
           </div>
 
+          {/* Issue Type */}
           <div>
-            <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1">
-              Issue Category
+            <label className="block font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">
+              Incident Category
             </label>
             <div className="grid grid-cols-3 gap-2">
-              {(['delay', 'damage', 'incident'] as IncidentType[]).map((cat) => (
+              {[
+                { id: 'delay' as IncidentType, label: 'Schedule Delay', icon: Clock },
+                { id: 'damage' as IncidentType, label: 'Equipment Damage', icon: Flame },
+                { id: 'incident' as IncidentType, label: 'Facility Anomaly', icon: AlertCircle },
+              ].map((cat) => {
+                const Icon = cat.icon;
+                return (
+                  <button
+                    key={cat.id}
+                    type="button"
+                    onClick={() => setType(cat.id)}
+                    className={`p-2.5 rounded-xl border text-xs font-semibold flex flex-col items-center gap-1 transition-all cursor-pointer ${
+                      type === cat.id
+                        ? 'border-rose-500 bg-rose-50 text-rose-800 dark:bg-rose-950/60 dark:text-rose-200 ring-2 ring-rose-500/20'
+                        : 'border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50'
+                    }`}
+                  >
+                    <Icon className="h-4 w-4" />
+                    <span>{cat.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Severity */}
+          <div>
+            <label className="block font-semibold text-zinc-700 dark:text-zinc-300 mb-1">
+              Estimated Severity Level
+            </label>
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                { id: 'low' as IncidentSeverity, label: 'Low (Minor / 10-min)' },
+                { id: 'medium' as IncidentSeverity, label: 'Medium (Calibration)' },
+                { id: 'high' as IncidentSeverity, label: 'High (Immediate Fix)' },
+              ].map((s) => (
                 <button
-                  key={cat}
+                  key={s.id}
                   type="button"
-                  onClick={() => setType(cat)}
-                  className={`p-2.5 rounded-xl border text-xs font-semibold capitalize transition-all cursor-pointer ${
-                    type === cat
-                      ? 'border-rose-500 bg-rose-50 text-rose-800 dark:bg-rose-950/60 dark:text-rose-200 ring-2 ring-rose-500/20'
-                      : 'border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50'
+                  onClick={() => setSeverity(s.id)}
+                  className={`p-2 rounded-lg border text-[11px] font-semibold transition-all cursor-pointer ${
+                    severity === s.id
+                      ? 'border-indigo-600 bg-indigo-50 text-indigo-900 dark:bg-indigo-950 dark:text-indigo-200'
+                      : 'border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400'
                   }`}
                 >
-                  {cat}
+                  {s.label}
                 </button>
               ))}
             </div>
           </div>
 
+          {/* Description */}
           <div>
-            <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1">
-              Description & Details
+            <label className="block font-semibold text-zinc-700 dark:text-zinc-300 mb-1">
+              Descriptive Summary
             </label>
             <textarea
-              rows={4}
+              rows={3}
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="Detail what occurred (e.g. keycard reader offline causing 25-min delay, loose cable connection on laser power supply)."
+              placeholder="Detail observations (e.g. Card key reader failed to unlock door; lab supervisor notified at 10:15)."
               required
               className="w-full text-xs rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 p-3 text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-rose-500"
             />
           </div>
 
-          <div className="pt-2 flex justify-end gap-2">
+          <div className="pt-2 flex justify-end gap-2 border-t border-zinc-100 dark:border-zinc-800">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 rounded-xl text-xs text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300"
+              className="px-4 py-2 rounded-xl text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={submitting}
-              className="flex items-center gap-1.5 px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold rounded-xl shadow-xs transition-colors cursor-pointer"
+              className="flex items-center gap-1.5 px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-semibold rounded-xl shadow-xs transition-colors cursor-pointer"
             >
               <Flag className="h-4 w-4" />
-              <span>{submitting ? 'Submitting...' : 'Log Report'}</span>
+              <span>{submitting ? 'Logging...' : 'Submit Incident Report'}</span>
             </button>
           </div>
         </form>

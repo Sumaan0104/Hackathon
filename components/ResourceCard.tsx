@@ -11,7 +11,10 @@ import {
   ShieldCheck, 
   CalendarPlus, 
   ListOrdered,
-  Sparkles
+  Sparkles,
+  Gauge,
+  CheckCircle2,
+  Clock
 } from 'lucide-react';
 
 interface ResourceCardProps {
@@ -57,16 +60,24 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
   return (
     <div className="flex flex-col justify-between rounded-2xl border border-zinc-200 bg-white p-5 shadow-xs hover:shadow-md transition-all dark:border-zinc-800 dark:bg-zinc-900 group">
       <div>
-        {/* Top Header: Badge & Status */}
+        {/* Top Header: Badge, Utilization & Status */}
         <div className="flex items-center justify-between gap-2 mb-3">
           <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border ${badge.classes}`}>
             <TypeIcon className="h-3.5 w-3.5" />
             {badge.label}
           </span>
-          <span className="inline-flex items-center gap-1 text-[11px] text-zinc-500 dark:text-zinc-400 font-medium">
-            <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-            Active on Campus
-          </span>
+
+          <div className="flex items-center gap-2">
+            {resource.safety_tier && (
+              <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-700">
+                Tier {resource.safety_tier} Safety
+              </span>
+            )}
+            <span className="inline-flex items-center gap-1 text-[11px] text-zinc-500 dark:text-zinc-400 font-medium">
+              <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+              Active
+            </span>
+          </div>
         </div>
 
         {/* Resource Name */}
@@ -91,21 +102,47 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
           {resource.description}
         </p>
 
+        {/* Hardware & Spec Badges */}
+        {resource.specs && resource.specs.length > 0 && (
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            {resource.specs.slice(0, 3).map((spec, i) => (
+              <span
+                key={i}
+                className="text-[10px] font-medium px-2 py-0.5 rounded-md bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300 border border-zinc-200/60 dark:border-zinc-700/60"
+              >
+                {spec}
+              </span>
+            ))}
+            {resource.specs.length > 3 && (
+              <span className="text-[10px] text-zinc-400 self-center">
+                +{resource.specs.length - 3} more
+              </span>
+            )}
+          </div>
+        )}
+
         {/* Eligibility Requirements Box */}
         <div className="mt-4 rounded-xl bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200/70 dark:border-amber-900/40 p-3">
           <div className="flex items-center gap-1.5 text-xs font-semibold text-amber-900 dark:text-amber-200">
             <ShieldCheck className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
-            <span>Eligibility Checklist</span>
+            <span>Eligibility Requirements</span>
           </div>
-          <p className="mt-1 text-[11px] text-amber-800 dark:text-amber-300 leading-normal">
+          <p className="mt-1 text-[11px] text-amber-800 dark:text-amber-300 leading-normal line-clamp-2">
             {resource.eligibility_requirements || 'Open to all enrolled students with campus ID verification.'}
           </p>
         </div>
 
-        {/* Owner Info */}
-        <div className="mt-3 text-[11px] text-zinc-500 dark:text-zinc-400">
-          Managed by: <strong className="text-zinc-700 dark:text-zinc-300">{resource.owner_name}</strong>
-          {resource.owner_department && ` (${resource.owner_department})`}
+        {/* Owner & Available Hours Footer */}
+        <div className="mt-3 pt-2 flex items-center justify-between text-[11px] text-zinc-500 dark:text-zinc-400">
+          <div>
+            Custodian: <strong className="text-zinc-700 dark:text-zinc-300">{resource.owner_name}</strong>
+          </div>
+          {resource.available_hours && (
+            <div className="flex items-center gap-1 text-[10px] text-zinc-400">
+              <Clock className="h-3 w-3" />
+              <span>{resource.available_hours}</span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -116,12 +153,12 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
           className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-xl shadow-xs transition-colors cursor-pointer"
         >
           <CalendarPlus className="h-4 w-4" />
-          <span>Request Booking</span>
+          <span>Reserve Slot</span>
         </button>
 
         <button
           onClick={() => onViewWaitlist(resource)}
-          title="View Waitlist Queue (Ordered by least recent use)"
+          title="View Fair-Access Waitlist Queue (Ordered by least recent use)"
           className="flex items-center justify-center gap-1 px-3 py-2 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:text-zinc-300 text-xs font-medium rounded-xl transition-colors cursor-pointer"
         >
           <ListOrdered className="h-4 w-4" />

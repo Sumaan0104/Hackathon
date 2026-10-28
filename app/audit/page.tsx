@@ -11,13 +11,18 @@ import {
   FileCode, 
   Layers, 
   CheckCircle,
-  Database
+  Database,
+  Download,
+  Copy,
+  Check
 } from 'lucide-react';
+import { FormattedDate } from '@/components/FormattedDate';
 
 export default function AuditLogPage() {
   const { auditLogs } = useCampusShare();
   const [filterAction, setFilterAction] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [copiedId, setCopiedId] = useState<string | null>(null);
 
   const filteredLogs = auditLogs.filter((entry) => {
     const matchesFilter = filterAction === 'all' || entry.action.includes(filterAction);
@@ -48,20 +53,46 @@ export default function AuditLogPage() {
     return 'bg-blue-100 text-blue-800 border-blue-300 dark:bg-blue-950/60 dark:text-blue-300';
   };
 
+  const handleCopy = (id: string, text: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 2000);
+  };
+
+  const handleExportJSON = () => {
+    const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(auditLogs, null, 2));
+    const downloadAnchor = document.createElement('a');
+    downloadAnchor.setAttribute('href', dataStr);
+    downloadAnchor.setAttribute('download', `campus-share-audit-${new Date().toISOString().split('T')[0]}.json`);
+    document.body.appendChild(downloadAnchor);
+    downloadAnchor.click();
+    downloadAnchor.remove();
+  };
+
   return (
     <div className="space-y-6 animate-in fade-in duration-200">
       
       {/* Header */}
-      <div className="border-b border-zinc-200 dark:border-zinc-800 pb-4">
-        <div className="flex items-center gap-2">
-          <Database className="h-6 w-6 text-indigo-600 dark:text-indigo-400" />
-          <h1 className="text-2xl font-extrabold text-zinc-900 dark:text-white tracking-tight">
-            Campus Audit Trail (<code className="font-mono text-indigo-600 dark:text-indigo-400">audit_log</code>)
-          </h1>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-zinc-200 dark:border-zinc-800 pb-4">
+        <div>
+          <div className="flex items-center gap-2">
+            <Database className="h-6 w-6 text-indigo-600 dark:text-indigo-400" />
+            <h1 className="text-2xl font-extrabold text-zinc-900 dark:text-white tracking-tight">
+              Audit Compliance Trail (<code className="font-mono text-indigo-600 dark:text-indigo-400">audit_log</code>)
+            </h1>
+          </div>
+          <p className="text-xs text-zinc-500 mt-1">
+            Mandatory compliance log: All reservations, owner decisions with written reason, check-in inspections, and incidents are recorded.
+          </p>
         </div>
-        <p className="text-xs text-zinc-500 mt-1">
-          Mandatory compliance log: Every listing, reservation request, owner approval/rejection decision with written reason, check-in note, return inspection, and incident report is immutably recorded here.
-        </p>
+
+        <button
+          onClick={handleExportJSON}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-xs font-semibold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-700 transition-colors cursor-pointer self-start sm:self-auto"
+        >
+          <Download className="h-3.5 w-3.5" />
+          <span>Export JSON Audit Trail</span>
+        </button>
       </div>
 
       {/* Filter and Search Controls */}
@@ -69,7 +100,7 @@ export default function AuditLogPage() {
         {/* Action Type Filter */}
         <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 text-xs">
           {[
-            { id: 'all', label: 'All Events' },
+            { id: 'all', label: `All Events (${auditLogs.length})` },
             { id: 'BOOKING', label: 'Bookings' },
             { id: 'RESOURCE', label: 'Resources' },
             { id: 'CHECKED_IN', label: 'Check-Ins' },
@@ -127,7 +158,7 @@ export default function AuditLogPage() {
 
                 <div className="flex items-center gap-1.5 text-xs text-zinc-400">
                   <Clock className="h-3.5 w-3.5" />
-                  <span>{new Date(entry.created_at).toLocaleString()}</span>
+                  <FormattedDate date={entry.created_at} />
                 </div>
               </div>
 
@@ -146,10 +177,16 @@ export default function AuditLogPage() {
               </div>
 
               {/* JSON Metadata Payload */}
-              <div className="mt-2 rounded-xl bg-zinc-950 text-zinc-200 p-3 font-mono text-[11px] overflow-x-auto border border-zinc-800 shadow-inner">
+              <div className="mt-2 rounded-xl bg-zinc-950 text-zinc-200 p-3 font-mono text-[11px] overflow-x-auto border border-zinc-800 shadow-inner relative group">
                 <div className="text-[10px] text-zinc-500 mb-1 flex items-center justify-between">
                   <span>METADATA PAYLOAD:</span>
-                  <span>Entry ID: {entry.id}</span>
+                  <button
+                    onClick={() => handleCopy(entry.id, JSON.stringify(entry.details, null, 2))}
+                    className="flex items-center gap-1 text-[10px] text-zinc-400 hover:text-white transition-colors"
+                  >
+                    {copiedId === entry.id ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />}
+                    <span>{copiedId === entry.id ? 'Copied' : 'Copy'}</span>
+                  </button>
                 </div>
                 <pre className="whitespace-pre-wrap leading-relaxed text-emerald-400/90">
                   {JSON.stringify(entry.details, null, 2)}

@@ -5,7 +5,10 @@ import {
   Profile, 
   IncidentReport, 
   AuditLogEntry, 
-  UserRole 
+  UserRole,
+  InspectionChecklist,
+  IncidentType,
+  IncidentSeverity
 } from './types';
 import { 
   MOCK_PROFILES, 
@@ -15,8 +18,6 @@ import {
   MOCK_AUDIT_LOGS 
 } from './mock-data';
 
-// Server-side in-memory repository (initialized with rich fictional college data)
-// In production with Supabase connected, this syncs and mirrors DB state.
 class CampusShareStore {
   private profiles: Map<string, Profile> = new Map();
   private resources: Map<string, Resource> = new Map();
@@ -28,7 +29,13 @@ class CampusShareStore {
     this.seed();
   }
 
-  private seed() {
+  public seed() {
+    this.profiles.clear();
+    this.resources.clear();
+    this.bookings.clear();
+    this.incidents.clear();
+    this.auditLogs = [];
+
     Object.values(MOCK_PROFILES).forEach((p) => this.profiles.set(p.id, { ...p }));
     MOCK_RESOURCES.forEach((r) => this.resources.set(r.id, { ...r }));
     MOCK_BOOKINGS.forEach((b) => this.bookings.set(b.id, { ...b }));
@@ -54,10 +61,12 @@ class CampusShareStore {
     return this.resources.get(id);
   }
 
-  addResource(actor: Profile, resourceData: Omit<Resource, 'id' | 'created_at' | 'owner_id' | 'owner_name' | 'owner_department'>): Resource {
-    // Server Role Check: only owner, manager, or admin can list resources
+  addResource(
+    actor: Profile, 
+    resourceData: Omit<Resource, 'id' | 'created_at' | 'owner_id' | 'owner_name' | 'owner_department'>
+  ): Resource {
     if (!['owner', 'manager', 'admin'].includes(actor.role)) {
-      throw new Error('Unauthorized: Only resource owners, managers, or admins can list resources.');
+      throw new Error('Unauthorized: Server role policy permits only owner, manager, or admin roles to list resources.');
     }
 
     const newResource: Resource = {
@@ -66,16 +75,17 @@ class CampusShareStore {
       owner_id: actor.id,
       owner_name: actor.full_name,
       owner_department: actor.department,
+      utilization_rate: 0,
       created_at: new Date().toISOString(),
     };
 
     this.resources.set(newResource.id, newResource);
 
-    // Audit log
     this.logAction(actor, 'RESOURCE_CREATED', 'resource', newResource.id, {
       name: newResource.name,
       type: newResource.type,
       location: newResource.location,
+      capacity: newResource.capacity,
     });
 
     return newResource;
@@ -83,14 +93,10 @@ class CampusShareStore {
 
   // --- Bookings & Validation Rules ---
 
-  /**
-   * Calculates the total hours a user has booked in the given target week.
-   * Only approved, pending, checked_in, and completed bookings count towards weekly cap.
-   */
   getUserWeeklyBookedHours(userId: string, targetDateStr: string, excludeBookingId?: string): number {
     const targetDate = new Date(targetDateStr);
     
-    // Determine start and end of the ISO week (Monday to Sunday)
+    // ISO week calculation (Monday to Sunday)
     const day = targetDate.getUTCDay();
     const diffToMonday = (day === 0 ? -6 : 1) - day;
     const weekStart = new Date(targetDate);
@@ -115,10 +121,7 @@ class CampusShareStore {
     return totalHours;
   }
 
-  /**
-   * Checks for schedule clashes with existing approved or checked-in bookings for a resource.
-   */
-  hasBookingClash(resourceId: string, startTimeStr: string, endTimeStr: string, excludeBookingId?: string): boolean {
+  findBookingClash(resourceId: string, startTimeStr: string, endTimeStr: string, excludeBookingId?: string): Booking | null {
     const start = new Date(startTimeStr).getTime();
     const end = new Date(endTimeStr).getTime();
 
@@ -130,33 +133,29 @@ class CampusShareStore {
       const bStart = new Date(b.start_time).getTime();
       const bEnd = new Date(b.end_time).getTime();
 
-      // Check overlap: (StartA < EndB) and (EndA > StartB)
+      // Overlap: (StartA < EndB) && (EndA > StartB)
       if (start < bEnd && end > bStart) {
-        return true;
+        return b;
       }
     }
-    return false;
+    return null;
   }
 
-  /**
-   * Request a booking.
-   * Enforces weekly cap, checks clashes, and records to audit log.
-   */
   requestBooking(
     actor: Profile, 
     resourceId: string, 
     startTime: string, 
     endTime: string, 
     purpose: string
-  ): { booking: Booking; waitlisted: boolean; warning?: string } {
+  ): { booking: Booking; waitlisted: boolean; warning?: string; clashingWith?: string } {
     const resource = this.resources.get(resourceId);
     if (!resource) throw new Error('Resource not found.');
-    if (!resource.is_active) throw new Error('Resource is currently inactive.');
+    if (!resource.is_active) throw new Error('Resource is currently inactive for maintenance.');
 
     const start = new Date(startTime);
     const end = new Date(endTime);
     if (isNaN(start.getTime()) || isNaN(end.getTime())) {
-      throw new Error('Invalid start or end date format.');
+      throw new Error('Invalid date-time format provided.');
     }
     if (end <= start) {
       throw new Error('End time must be after start time.');
@@ -167,23 +166,23 @@ class CampusShareStore {
       throw new Error('Booking duration must be greater than zero.');
     }
 
-    // Weekly hours cap check (default 6h)
+    // Weekly cap enforcement (default 6.0h)
     const currentWeekHours = this.getUserWeeklyBookedHours(actor.id, startTime);
     const userCap = actor.weekly_hours_cap ?? 6.0;
 
     if (currentWeekHours + durationHours > userCap) {
       throw new Error(
-        `Weekly hours cap exceeded. You currently have ${currentWeekHours.toFixed(1)}h booked this week. Requesting ${durationHours.toFixed(1)}h would exceed your weekly cap of ${userCap}h.`
+        `Weekly quota exceeded: You have ${currentWeekHours.toFixed(1)}h booked this week. Requesting ${durationHours.toFixed(1)}h would exceed your quota of ${userCap}h.`
       );
     }
 
-    // Check clash
-    const clash = this.hasBookingClash(resourceId, startTime, endTime);
+    // Clash detection
+    const clashingBooking = this.findBookingClash(resourceId, startTime, endTime);
+    const clash = !!clashingBooking;
 
-    // Initial status: if clash exists, system flags waitlist option; otherwise pending owner review
     const initialStatus: BookingStatus = clash ? 'waitlisted' : 'pending';
     const statusReason = clash 
-      ? 'Automatically placed on waitlist due to time clash with an approved booking. Ordered by least recent use.'
+      ? `Auto-routed to Fair-Access Waitlist: Time slot conflicts with scheduled session (${new Date(clashingBooking.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - ${new Date(clashingBooking.end_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}). Ordered by least recent use.`
       : undefined;
 
     const newBooking: Booking = {
@@ -195,37 +194,34 @@ class CampusShareStore {
       user_email: actor.email,
       start_time: startTime,
       end_time: endTime,
-      duration_hours: durationHours,
+      duration_hours: Number(durationHours.toFixed(1)),
       purpose,
       status: initialStatus,
       status_reason: statusReason,
+      clash_detected: clash,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
 
     this.bookings.set(newBooking.id, newBooking);
 
-    // Audit log
     this.logAction(actor, 'BOOKING_REQUESTED', 'booking', newBooking.id, {
       resource_id: resourceId,
       resource_name: resource.name,
       duration_hours: durationHours,
-      weekly_hours_before: currentWeekHours,
+      weekly_hours_prior: currentWeekHours,
       status: initialStatus,
+      clash_detected: clash,
     });
 
     return { 
       booking: newBooking, 
       waitlisted: clash, 
-      warning: clash ? 'Time slot clashes with another booking. You have been placed on the waitlist.' : undefined 
+      warning: clash ? `Slot conflicts with an approved booking. You've been placed on the Fair-Access Waitlist.` : undefined,
+      clashingWith: clashingBooking ? clashingBooking.user_name : undefined
     };
   }
 
-  /**
-   * Owner decision: approve, reject, or waitlist.
-   * RULE: Every approve/reject/waitlist needs a written reason shown to the user.
-   * RULE: Owners make final decisions. All role checks happen on the server.
-   */
   updateBookingDecision(
     actor: Profile,
     bookingId: string,
@@ -238,23 +234,22 @@ class CampusShareStore {
     const resource = this.resources.get(booking.resource_id);
     if (!resource) throw new Error('Resource not found.');
 
-    // Server-side Role Check: Must be the resource owner, a manager, or admin
+    // Server Role Check
     const isOwner = resource.owner_id === actor.id;
     const isPrivileged = ['manager', 'admin'].includes(actor.role);
     if (!isOwner && !isPrivileged) {
-      throw new Error('Unauthorized: Only the resource owner or an administrator can make decisions on this booking.');
+      throw new Error('Unauthorized: Only resource owners, managers, or admins can authorize booking decisions.');
     }
 
-    // RULE: Written reason is strictly required
+    // MANDATORY RULE: Written reason required
     if (!writtenReason || writtenReason.trim().length < 5) {
-      throw new Error('A written reason of at least 5 characters is required for all approve, reject, or waitlist decisions.');
+      throw new Error('Compliance Violation: Every approve, reject, or waitlist decision must provide a written reason of at least 5 characters shown to the borrower.');
     }
 
-    // If approving, verify again no clash exists
     if (decision === 'approved') {
-      const clash = this.hasBookingClash(booking.resource_id, booking.start_time, booking.end_time, booking.id);
+      const clash = this.findBookingClash(booking.resource_id, booking.start_time, booking.end_time, booking.id);
       if (clash) {
-        throw new Error('Cannot approve booking: There is a time clash with another already approved booking.');
+        throw new Error(`Conflict Detected: Cannot approve because this slot overlaps with an approved booking by ${clash.user_name}.`);
       }
     }
 
@@ -266,11 +261,10 @@ class CampusShareStore {
 
     this.bookings.set(booking.id, booking);
 
-    // Audit log
     const actionName = decision === 'approved' ? 'BOOKING_APPROVED' : decision === 'rejected' ? 'BOOKING_REJECTED' : 'BOOKING_WAITLISTED';
     this.logAction(actor, actionName, 'booking', booking.id, {
       decision,
-      writtenReason: booking.status_reason,
+      written_reason: booking.status_reason,
       borrower_id: booking.user_id,
       borrower_name: booking.user_name,
     });
@@ -278,16 +272,17 @@ class CampusShareStore {
     return booking;
   }
 
-  /**
-   * Check-in with condition notes.
-   * Borrower or Owner confirms arrival and inspects condition before usage.
-   */
-  checkIn(actor: Profile, bookingId: string, conditionNotes: string): Booking {
+  checkIn(
+    actor: Profile, 
+    bookingId: string, 
+    conditionNotes: string, 
+    checklist?: InspectionChecklist
+  ): Booking {
     const booking = this.bookings.get(bookingId);
     if (!booking) throw new Error('Booking not found.');
 
     if (booking.status !== 'approved') {
-      throw new Error(`Cannot check in: Booking is currently '${booking.status}', must be 'approved'.`);
+      throw new Error(`Invalid lifecycle state: Booking status is '${booking.status}', must be 'approved' to check in.`);
     }
 
     const resource = this.resources.get(booking.resource_id);
@@ -296,37 +291,45 @@ class CampusShareStore {
     const isPrivileged = ['manager', 'admin'].includes(actor.role);
 
     if (!isBorrower && !isOwner && !isPrivileged) {
-      throw new Error('Unauthorized to perform check-in.');
+      throw new Error('Unauthorized: Only the borrower, facility owner, or administrators can check in.');
     }
 
     if (!conditionNotes || conditionNotes.trim().length < 3) {
-      throw new Error('Please provide initial check-in condition notes (e.g. equipment state, cleanliness).');
+      throw new Error('Physical condition inspection notes are mandatory upon arrival.');
     }
 
     booking.status = 'checked_in';
     booking.checked_in_at = new Date().toISOString();
     booking.checkin_condition_notes = conditionNotes.trim();
+    booking.checkin_checklist = checklist || {
+      physicalChecked: true,
+      cleanlinessVerified: true,
+      safetySecured: true,
+      accessoriesPresent: true,
+    };
     booking.updated_at = new Date().toISOString();
 
     this.bookings.set(booking.id, booking);
 
     this.logAction(actor, 'BOOKING_CHECKED_IN', 'booking', booking.id, {
-      checkin_notes: booking.checkin_condition_notes,
+      condition_notes: booking.checkin_condition_notes,
+      checklist: booking.checkin_checklist,
     });
 
     return booking;
   }
 
-  /**
-   * Return with condition notes.
-   * Records final inspection, condition notes, and completes the booking.
-   */
-  returnResource(actor: Profile, bookingId: string, conditionNotes: string): Booking {
+  returnResource(
+    actor: Profile, 
+    bookingId: string, 
+    conditionNotes: string, 
+    checklist?: InspectionChecklist
+  ): Booking {
     const booking = this.bookings.get(bookingId);
     if (!booking) throw new Error('Booking not found.');
 
     if (booking.status !== 'checked_in') {
-      throw new Error(`Cannot return: Booking must be 'checked_in' first.`);
+      throw new Error(`Invalid lifecycle state: Booking must be in 'checked_in' state to record departure return.`);
     }
 
     const resource = this.resources.get(booking.resource_id);
@@ -339,28 +342,37 @@ class CampusShareStore {
     }
 
     if (!conditionNotes || conditionNotes.trim().length < 3) {
-      throw new Error('Please provide return condition notes (e.g. returned clean, all accessories verified).');
+      throw new Error('Final return condition notes are mandatory upon departure.');
     }
 
     booking.status = 'completed';
     booking.returned_at = new Date().toISOString();
     booking.return_condition_notes = conditionNotes.trim();
+    booking.return_checklist = checklist || {
+      physicalChecked: true,
+      cleanlinessVerified: true,
+      safetySecured: true,
+      accessoriesPresent: true,
+    };
     booking.updated_at = new Date().toISOString();
 
     this.bookings.set(booking.id, booking);
 
     this.logAction(actor, 'BOOKING_RETURNED', 'booking', booking.id, {
       return_notes: booking.return_condition_notes,
+      checklist: booking.return_checklist,
     });
 
     return booking;
   }
 
-  /**
-   * Report delay, damage, or incident.
-   * RULE: No automated penalties. Owners make final decisions.
-   */
-  reportIncident(actor: Profile, bookingId: string, type: 'delay' | 'damage' | 'incident', description: string): IncidentReport {
+  reportIncident(
+    actor: Profile, 
+    bookingId: string, 
+    type: IncidentType, 
+    severity: IncidentSeverity,
+    description: string
+  ): IncidentReport {
     const booking = this.bookings.get(bookingId);
     if (!booking) throw new Error('Booking not found.');
 
@@ -370,11 +382,11 @@ class CampusShareStore {
     const isPrivileged = ['manager', 'admin'].includes(actor.role);
 
     if (!isBorrower && !isOwner && !isPrivileged) {
-      throw new Error('Unauthorized: Only parties involved or admins can log an incident report.');
+      throw new Error('Unauthorized to report incidents on this booking.');
     }
 
     if (!description || description.trim().length < 5) {
-      throw new Error('Please provide a descriptive incident summary of at least 5 characters.');
+      throw new Error('Detailed description of at least 5 characters is required.');
     }
 
     const incident: IncidentReport = {
@@ -385,6 +397,8 @@ class CampusShareStore {
       reporter_name: actor.full_name,
       reporter_role: actor.role,
       type,
+      severity,
+      status: 'acknowledged',
       description: description.trim(),
       created_at: new Date().toISOString(),
     };
@@ -394,27 +408,21 @@ class CampusShareStore {
     this.logAction(actor, 'INCIDENT_REPORTED', 'incident', incident.id, {
       booking_id: bookingId,
       incident_type: type,
+      severity,
       description: incident.description,
-      note: 'Logged for review. No automated penalty applied.',
+      governance_policy: 'Logged for review. No automated penalties applied.',
     });
 
     return incident;
   }
 
-  // --- Waitlist Ordered by Least Recent Use ---
-  /**
-   * Retrieves waitlisted bookings for a resource ordered by least recent use:
-   * Users who have either NEVER used the resource (or platform) or haven't used it for the longest time
-   * appear at the top of the priority queue.
-   */
   getWaitlistByLeastRecentUse(resourceId: string): Array<Booking & { lastUsedAt: string | null; priorityScore: number }> {
     const waitlisted = Array.from(this.bookings.values()).filter(
       (b) => b.resource_id === resourceId && b.status === 'waitlisted'
     );
 
-    // Compute last completed/checked_in booking timestamp for each user
     return waitlisted.map((b) => {
-      let lastUsageTime: number = 0; // 0 means never used = highest priority
+      let lastUsageTime: number = 0;
       let lastUsageIso: string | null = null;
 
       this.bookings.forEach((otherB) => {
@@ -432,10 +440,9 @@ class CampusShareStore {
         lastUsedAt: lastUsageIso,
         priorityScore: lastUsageTime,
       };
-    }).sort((a, b) => a.priorityScore - b.priorityScore); // ascending: 0 (never used) first!
+    }).sort((a, b) => a.priorityScore - b.priorityScore);
   }
 
-  // --- Bookings Query ---
   getBookings(): Booking[] {
     return Array.from(this.bookings.values()).map((b) => ({
       ...b,
@@ -477,7 +484,6 @@ class CampusShareStore {
   }
 }
 
-// Global singleton instance on server
 declare global {
   var __campusShareStore: CampusShareStore | undefined;
 }
