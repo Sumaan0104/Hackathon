@@ -4,6 +4,19 @@ import { campusStore } from './store';
 import { Resource, UserRole, Booking, IncidentReport, AuditLogEntry, Profile, InspectionChecklist, IncidentSeverity, IncidentType } from './types';
 import { revalidatePath } from 'next/cache';
 import { createClient as createServerSupabase } from './supabase/server';
+import { 
+  isSupabaseDbConnected, 
+  fetchSupabaseBookings, 
+  fetchSupabaseResources, 
+  fetchSupabaseProfiles, 
+  fetchSupabaseIncidents, 
+  fetchSupabaseAuditLogs, 
+  insertSupabaseBooking, 
+  updateSupabaseBooking, 
+  insertSupabaseAuditLog, 
+  insertSupabaseIncident, 
+  insertSupabaseResource 
+} from './supabase-db';
 
 export async function getProfileServer(profileIdOrEmail: string): Promise<Profile> {
   // Check if there's an active Supabase Auth user session from cookies
@@ -46,6 +59,32 @@ export async function getProfileServer(profileIdOrEmail: string): Promise<Profil
 }
 
 export async function fetchAllData(profileIdOrEmail: string = 'user-1') {
+  // Sync with live Supabase Postgres tables if available
+  const isConnected = await isSupabaseDbConnected();
+  if (isConnected) {
+    try {
+      const [supaProfiles, supaResources, supaBookings, supaIncidents, supaAudit] = await Promise.all([
+        fetchSupabaseProfiles(),
+        fetchSupabaseResources(),
+        fetchSupabaseBookings(),
+        fetchSupabaseIncidents(),
+        fetchSupabaseAuditLogs(),
+      ]);
+
+      if (supaProfiles && supaResources && supaBookings) {
+        campusStore.syncFromSupabase(
+          supaProfiles,
+          supaResources,
+          supaBookings,
+          supaIncidents || undefined,
+          supaAudit || undefined
+        );
+      }
+    } catch (e) {
+      console.warn('Supabase DB sync note:', e);
+    }
+  }
+
   const currentProfile = await getProfileServer(profileIdOrEmail);
   const resources = campusStore.getResources();
   const bookings = campusStore.getBookings();
@@ -64,6 +103,7 @@ export async function fetchAllData(profileIdOrEmail: string = 'user-1') {
     auditLogs,
     profiles,
     weeklyHours,
+    isDatabaseConnected: isConnected,
   };
 }
 
@@ -77,6 +117,17 @@ export async function requestBookingAction(
   const actor = await getProfileServer(profileIdOrEmail);
   // Authoritative server-side validation & creation
   const result = campusStore.requestBooking(actor, resourceId, startTime, endTime, purpose);
+
+  // Sync to Supabase Postgres if connected
+  const isConnected = await isSupabaseDbConnected();
+  if (isConnected) {
+    if (result.success && result.booking) {
+      await insertSupabaseBooking(result.booking);
+    }
+    const latestAudit = campusStore.getAuditLogs()[0];
+    if (latestAudit) await insertSupabaseAuditLog(latestAudit);
+  }
+
   revalidatePath('/');
   revalidatePath('/bookings');
   revalidatePath('/audit');
@@ -92,6 +143,14 @@ export async function joinWaitlistAction(
 ) {
   const actor = await getProfileServer(profileIdOrEmail);
   const booking = campusStore.joinWaitlist(actor, resourceId, startTime, endTime, purpose);
+
+  const isConnected = await isSupabaseDbConnected();
+  if (isConnected) {
+    await insertSupabaseBooking(booking);
+    const latestAudit = campusStore.getAuditLogs()[0];
+    if (latestAudit) await insertSupabaseAuditLog(latestAudit);
+  }
+
   revalidatePath('/');
   revalidatePath('/bookings');
   revalidatePath('/audit');
@@ -106,6 +165,20 @@ export async function updateBookingDecisionAction(
 ) {
   const actor = await getProfileServer(profileIdOrEmail);
   const updatedBooking = campusStore.updateBookingDecision(actor, bookingId, decision, writtenReason);
+
+  const isConnected = await isSupabaseDbConnected();
+  if (isConnected) {
+    await updateSupabaseBooking(bookingId, {
+      status: decision,
+      status_reason: writtenReason.trim(),
+      status_updated_at: updatedBooking.status_updated_at,
+      status_updated_by: updatedBooking.status_updated_by,
+      updated_at: updatedBooking.updated_at,
+    });
+    const latestAudit = campusStore.getAuditLogs()[0];
+    if (latestAudit) await insertSupabaseAuditLog(latestAudit);
+  }
+
   revalidatePath('/');
   revalidatePath('/bookings');
   revalidatePath('/audit');
@@ -120,6 +193,20 @@ export async function checkInAction(
 ) {
   const actor = await getProfileServer(profileIdOrEmail);
   const updatedBooking = campusStore.checkIn(actor, bookingId, conditionNotes, checklist);
+
+  const isConnected = await isSupabaseDbConnected();
+  if (isConnected) {
+    await updateSupabaseBooking(bookingId, {
+      status: 'checked_in',
+      checkin_condition_notes: updatedBooking.checkin_condition_notes,
+      checkin_checklist: updatedBooking.checkin_checklist,
+      checked_in_at: updatedBooking.checked_in_at,
+      updated_at: updatedBooking.updated_at,
+    });
+    const latestAudit = campusStore.getAuditLogs()[0];
+    if (latestAudit) await insertSupabaseAuditLog(latestAudit);
+  }
+
   revalidatePath('/');
   revalidatePath('/bookings');
   revalidatePath('/audit');
@@ -134,6 +221,20 @@ export async function returnAction(
 ) {
   const actor = await getProfileServer(profileIdOrEmail);
   const updatedBooking = campusStore.returnResource(actor, bookingId, conditionNotes, checklist);
+
+  const isConnected = await isSupabaseDbConnected();
+  if (isConnected) {
+    await updateSupabaseBooking(bookingId, {
+      status: 'completed',
+      return_condition_notes: updatedBooking.return_condition_notes,
+      return_checklist: updatedBooking.return_checklist,
+      returned_at: updatedBooking.returned_at,
+      updated_at: updatedBooking.updated_at,
+    });
+    const latestAudit = campusStore.getAuditLogs()[0];
+    if (latestAudit) await insertSupabaseAuditLog(latestAudit);
+  }
+
   revalidatePath('/');
   revalidatePath('/bookings');
   revalidatePath('/audit');
@@ -149,6 +250,14 @@ export async function reportIncidentAction(
 ) {
   const actor = await getProfileServer(profileIdOrEmail);
   const report = campusStore.reportIncident(actor, bookingId, type, severity, description);
+
+  const isConnected = await isSupabaseDbConnected();
+  if (isConnected) {
+    await insertSupabaseIncident(report);
+    const latestAudit = campusStore.getAuditLogs()[0];
+    if (latestAudit) await insertSupabaseAuditLog(latestAudit);
+  }
+
   revalidatePath('/');
   revalidatePath('/bookings');
   revalidatePath('/incidents');
@@ -183,6 +292,14 @@ export async function createResourceAction(
     max_hours_per_booking: resourceData.max_hours_per_booking || 4.0,
     required_certifications: resourceData.required_certifications || [],
   });
+
+  const isConnected = await isSupabaseDbConnected();
+  if (isConnected) {
+    await insertSupabaseResource(newResource);
+    const latestAudit = campusStore.getAuditLogs()[0];
+    if (latestAudit) await insertSupabaseAuditLog(latestAudit);
+  }
+
   revalidatePath('/');
   revalidatePath('/resources');
   revalidatePath('/audit');

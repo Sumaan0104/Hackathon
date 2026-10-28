@@ -138,6 +138,31 @@ class CampusShareStore {
     this.saveToDisk();
   }
 
+  public syncFromSupabase(
+    profiles?: Profile[],
+    resources?: Resource[],
+    bookings?: Booking[],
+    incidents?: IncidentReport[],
+    auditLogs?: AuditLogEntry[]
+  ) {
+    if (profiles && profiles.length > 0) {
+      profiles.forEach((p) => this.profiles.set(p.id, p));
+    }
+    if (resources && resources.length > 0) {
+      resources.forEach((r) => this.resources.set(r.id, r));
+    }
+    if (bookings && bookings.length > 0) {
+      bookings.forEach((b) => this.bookings.set(b.id, b));
+    }
+    if (incidents && incidents.length > 0) {
+      incidents.forEach((inc) => this.incidents.set(inc.id, inc));
+    }
+    if (auditLogs && auditLogs.length > 0) {
+      this.auditLogs = auditLogs;
+    }
+    this.saveToDisk();
+  }
+
   // --- Profiles ---
   getProfile(id: string): Profile | undefined {
     this.loadFromDisk();
