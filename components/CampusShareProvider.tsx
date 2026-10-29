@@ -284,8 +284,11 @@ export const CampusShareProvider: React.FC<{ children: React.ReactNode }> = ({ c
     showToast(`Resource "${data.name}" listed successfully.`, 'success');
   };
 
-  // Reset demo fixtures
+  // Reset demo fixtures with explicit safety confirmation
   const handleResetDemoData = async () => {
+    if (typeof window !== 'undefined' && !window.confirm('Factory Reset Warning: Are you sure you want to reset all campus fixtures and bookings back to baseline?')) {
+      return;
+    }
     const res = await resetDemoDataAction(currentProfile.email || currentProfile.id);
     if (!res.success) {
       showToast(res.error || 'Failed to reset demonstration fixtures.', 'error');

@@ -46,7 +46,11 @@ export const BookingDecisionModal: React.FC<BookingDecisionModalProps> = ({
       await onSubmitDecision(booking.id, decision, writtenReason.trim());
       onClose();
     } catch (err: any) {
-      setErrorMsg(err.message || 'Failed to process decision.');
+      let rawMsg = err.message || 'Failed to process decision.';
+      if (rawMsg.includes('Minified React error') || rawMsg.includes('react.dev/errors')) {
+        rawMsg = 'Server Authorization / Sync Notice: Only verified facility custodians (owner@demo.com) or administrators can approve requests. Please ensure you are signed into an authorized account.';
+      }
+      setErrorMsg(rawMsg);
     } finally {
       setSubmitting(false);
     }

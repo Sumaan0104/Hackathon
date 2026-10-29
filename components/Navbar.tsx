@@ -308,11 +308,11 @@ export const Navbar: React.FC<NavbarProps> = ({
                     {onResetDemoData && (
                       <button
                         onClick={() => {
-                          onResetDemoData();
                           setRoleDropdownOpen(false);
+                          onResetDemoData();
                         }}
                         title="Reset sample fixtures"
-                        className="text-[10px] text-zinc-500 hover:text-indigo-600 flex items-center gap-1 lowercase"
+                        className="text-[10px] text-zinc-500 hover:text-indigo-600 flex items-center gap-1 lowercase cursor-pointer"
                       >
                         <RotateCcw className="h-3 w-3" /> reset
                       </button>

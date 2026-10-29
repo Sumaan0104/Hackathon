@@ -166,10 +166,21 @@ export async function updateBookingDecisionAction(
   writtenReason: string
 ) {
   try {
+    const isConnected = await isSupabaseDbConnected();
+    if (isConnected) {
+      try {
+        const supaBookings = await fetchSupabaseBookings();
+        if (supaBookings) {
+          campusStore.syncFromSupabase(undefined, undefined, supaBookings);
+        }
+      } catch (syncErr) {
+        // Fallback to local store
+      }
+    }
+
     const actor = await getProfileServer(profileIdOrEmail);
     const result = campusStore.updateBookingDecision(actor, bookingId, decision, writtenReason);
 
-    const isConnected = await isSupabaseDbConnected();
     if (isConnected) {
       await updateSupabaseBooking(bookingId, {
         status: decision,
@@ -182,10 +193,14 @@ export async function updateBookingDecisionAction(
       if (latestAudit) await insertSupabaseAuditLog(latestAudit);
     }
 
-    revalidatePath('/');
-    revalidatePath('/bookings');
-    revalidatePath('/owner/requests');
-    revalidatePath('/audit');
+    try {
+      revalidatePath('/');
+      revalidatePath('/bookings');
+      revalidatePath('/owner/requests');
+      revalidatePath('/audit');
+    } catch (revalErr) {
+      // Revalidation note: Never crash action payload
+    }
     return { 
       success: true, 
       booking: result.booking, 
